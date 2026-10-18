@@ -12,6 +12,10 @@ func _run() -> void:
 	root.add_child(scene)
 	await process_frame
 	await RenderingServer.frame_post_draw
+	if ProjectSettings.get_setting("application/config/name") != "a long table" or scene.name != "a long table":
+		push_error("Project and main scene must use the game name a long table.")
+		quit(1)
+		return
 	var original_cells: PackedByteArray = scene.world["cells"].duplicate()
 	var original_heights: PackedFloat32Array = scene.world["heights"].duplicate()
 	var original_seed: int = scene.world["seed"]

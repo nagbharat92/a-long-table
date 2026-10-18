@@ -1,7 +1,7 @@
 config_version=5
 
 [application]
-config/name="Island Lab"
+config/name="a long table"
 run/main_scene="res://main.tscn"
 config/features=PackedStringArray("4.4", "GL Compatibility")
 config/description="A small seeded island surrounded by water."

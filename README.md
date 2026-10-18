@@ -1,8 +1,8 @@
-# Tile Lab
+# a long table
 
 A small, systems-driven foraging game in the spirit of Forager, built in Godot 4. The plan is to add one element at a time, keep the game playable after each one, and ship once a fixed number of elements is in.
 
-**Play it:** https://nagbharat92.github.io/tile-lab/
+**Play it:** https://nagbharat92.github.io/a-long-table/
 
 Click the character to select it, then click the ground to move. Use **+ / -** or the mouse wheel to zoom and follow it; **Fit** returns to the whole island. Press **R** for a new island.
 
