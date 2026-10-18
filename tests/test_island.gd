@@ -44,7 +44,7 @@ func _initialize() -> void:
 		var coast_distance: PackedInt32Array = generator._coast_distance(cells)
 		for index in range(heights.size()):
 			if cells[index] == 1 and heights[index] <= Generator.SEA_LEVEL + Generator.BEACH_LEVEL:
-				_check(coast_distance[index] <= 3, "Sand lies on the shore, not inland.")
+				_check(coast_distance[index] <= ceili(Generator.BEACH_LEVEL / Generator.GENTLE_SLOPE), "Sand lies on the shore, not inland.")
 		var shelf := PackedByteArray()
 		shelf.resize(cells.size())
 		var sand_count := 0

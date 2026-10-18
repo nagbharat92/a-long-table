@@ -41,10 +41,14 @@ func _capture() -> void:
 		terrain.set_world(world)
 		viewport.add_child(terrain)
 		var camera := Camera2D.new()
-		camera.zoom = Vector2(2, 2)
-		camera.position = terrain.get_island_bounds().get_center()
+		var bounds := terrain.get_island_bounds()
+		var fit := minf(473.0 / bounds.size.x, 264.0 / bounds.size.y)
+		var zoom := floorf(fit) if fit >= 1.0 else 1.0 / ceilf(1.0 / fit)
+		camera.zoom = Vector2.ONE * zoom
+		camera.position = bounds.get_center()
 		viewport.add_child(camera)
-		terrain.set_ocean_rect(Rect2(camera.position - Vector2(497, 288) * 0.25, Vector2(497, 288) * 0.5))
+		var visible_size := Vector2(viewport.size) / camera.zoom
+		terrain.set_ocean_rect(Rect2(camera.position - visible_size * 0.5, visible_size))
 	var arguments := OS.get_cmdline_user_args()
 	if arguments.size() != 1:
 		push_error("Pass exactly one output PNG path.")

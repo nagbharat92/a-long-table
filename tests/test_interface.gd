@@ -47,6 +47,77 @@ func _run() -> void:
 		push_error("Returning to the original seed did not restore the original terrain.")
 		quit(1)
 		return
+	await process_frame
+	var character = scene.selection.characters[0]
+	character.set_process(false)
+	var initial_position: Vector2 = character.position
+	await _click(root.get_canvas_transform() * character.position)
+	if scene.selection.selected != [character] or not character.selected:
+		push_error("Mouse click did not select the character.")
+		quit(1)
+		return
+	var destination: Vector2 = initial_position + Vector2(42, 30)
+	await _click(root.get_canvas_transform() * destination)
+	if not character.is_moving():
+		push_error("Selected character did not receive a mouse movement command.")
+		quit(1)
+		return
+	for keycode in [KEY_W, KEY_A, KEY_S, KEY_D, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT]:
+		var key := InputEventKey.new()
+		key.keycode = keycode
+		key.pressed = true
+		Input.parse_input_event(key)
+		key = InputEventKey.new()
+		key.keycode = keycode
+		key.pressed = false
+		Input.parse_input_event(key)
+	await process_frame
+	if character.position != initial_position:
+		push_error("Keyboard input must not move the character.")
+		quit(1)
+		return
+	var overview_path := _argument("--character-overview=")
+	if not overview_path.is_empty():
+		print("Capture layout: character %s; island bounds %s; zoom %s." % [
+			initial_position, scene.terrain.get_island_bounds(), scene.camera.zoom,
+		])
+		await RenderingServer.frame_post_draw
+		if not _save_image(overview_path):
+			quit(1)
+			return
+	await _click(scene.zoom_in.get_global_rect().get_center())
+	if scene.zoom_factor <= 1.0:
+		push_error("Zoom-in button did not magnify the world.")
+		quit(1)
+		return
+	var wheel := InputEventMouseButton.new()
+	wheel.position = Vector2(root.size) * 0.5
+	wheel.button_index = MOUSE_BUTTON_WHEEL_UP
+	wheel.pressed = true
+	Input.parse_input_event(wheel)
+	await process_frame
+	if scene.zoom_factor < 2.0:
+		push_error("Mouse wheel did not zoom in.")
+		quit(1)
+		return
+	character.advance(0.5)
+	await process_frame
+	if not scene.camera.position.is_equal_approx(character.position):
+		push_error("Zoomed camera does not follow the character.")
+		quit(1)
+		return
+	var zoom_path := _argument("--character-zoom=")
+	if not zoom_path.is_empty():
+		await RenderingServer.frame_post_draw
+		if not _save_image(zoom_path):
+			quit(1)
+			return
+	await _click(scene.fit_button.get_global_rect().get_center())
+	if scene.zoom_factor != 1.0:
+		push_error("Fit button did not restore the whole-island view.")
+		quit(1)
+		return
+	print("PASS: pointer selection, movement commands, no keyboard movement, button/wheel zoom, follow and Fit.")
 	for window_size in [
 		Vector2i(1440, 900), Vector2i(800, 600), Vector2i(390, 844),
 		Vector2i(320, 568), Vector2i(2560, 1440), Vector2i(844, 390),
@@ -56,8 +127,9 @@ func _run() -> void:
 		await process_frame
 		await RenderingServer.frame_post_draw
 		var zoom: Vector2 = scene.camera.zoom
-		if zoom.x < 1.0 or zoom.x != floorf(zoom.x) or zoom.x != zoom.y:
-			push_error("Camera zoom must be a positive whole number at %s." % window_size)
+		var pixel_scale := zoom.x if zoom.x >= 1.0 else 1.0 / zoom.x
+		if zoom.x <= 0.0 or not is_equal_approx(pixel_scale, roundf(pixel_scale)) or zoom.x != zoom.y:
+			push_error("Fit zoom must use whole or reciprocal pixel scales at %s." % window_size)
 			quit(1)
 			return
 		var transform := root.get_canvas_transform()
@@ -88,7 +160,7 @@ func _run() -> void:
 			push_error("Resizing changed generated terrain.")
 			quit(1)
 			return
-		print("PASS: %s fits at integer zoom %d with ocean and overlay." % [window_size, int(zoom.x)])
+		print("PASS: %s fits at zoom %.2f with ocean and overlay." % [window_size, zoom.x])
 	for value in [719633, 829942, 534481, 915833, 934742, 271828]:
 		scene.show_seed(value)
 		for window_size in [Vector2i(320, 568), Vector2i(1440, 900)]:
@@ -100,8 +172,36 @@ func _run() -> void:
 				push_error("Seed %d does not fit without HUD overlap at %s." % [value, window_size])
 				quit(1)
 				return
-	print("PASS: R regenerates; seed restores terrain; all resize scenarios preserve it.")
+	var previous_character = scene.selection.characters[0]
+	previous_character.move_to(Vector2.ZERO)
+	scene._refresh()
+	await process_frame
+	await process_frame
+	if is_instance_valid(previous_character) or scene.selection.characters.size() != 1 or scene.character_layer.get_child_count() != 1:
+		push_error("Refresh during movement must replace the old character with exactly one new character.")
+		quit(1)
+		return
+	if not scene.selection.selected.is_empty() or scene.selection.characters[0].is_moving() or scene.zoom_factor != 1.0:
+		push_error("Refresh must clear selection, routes and magnification.")
+		quit(1)
+		return
+	print("PASS: R regenerates safely during movement; seed restores terrain; all resize scenarios preserve it.")
 	quit(0)
+
+
+func _click(point: Vector2) -> void:
+	var event := InputEventMouseButton.new()
+	event.position = point
+	event.button_index = MOUSE_BUTTON_LEFT
+	event.pressed = true
+	Input.parse_input_event(event)
+	event = InputEventMouseButton.new()
+	event.position = point
+	event.button_index = MOUSE_BUTTON_LEFT
+	event.pressed = false
+	Input.parse_input_event(event)
+	await process_frame
+	await process_frame
 
 
 func _save_image(path: String) -> bool:

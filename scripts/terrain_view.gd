@@ -1,7 +1,8 @@
 extends Node2D
 
 const Generator := preload("res://scripts/island_generator.gd")
-const TILE_SIZE := 4
+const Rules := preload("res://scripts/terrain_rules.gd")
+const TILE_SIZE := Rules.TILE_SIZE
 const OCEAN := Color("#2698ee")
 const GRASS := Color("#85cc49")
 const GRASS_LIGHT := Color("#bae879")
@@ -27,7 +28,10 @@ func set_world(world: Dictionary) -> void:
 
 
 func set_ocean_rect(rect: Rect2) -> void:
-	ocean_rect = rect.grow(2.0)
+	if ocean_rect.encloses(rect):
+		return
+	# Camera motion should reuse the cached terrain drawing between ocean extensions.
+	ocean_rect = rect.grow(128.0)
 	queue_redraw()
 
 
@@ -115,15 +119,13 @@ func _draw_detail(point: Vector2, x: int, y: int) -> void:
 
 
 func _is_land(x: int, y: int) -> bool:
-	if x < 0 or x >= Generator.WIDTH or y < 0 or y >= Generator.HEIGHT:
-		return false
-	return heights[y * Generator.WIDTH + x] > sea_level
+	return Rules.is_land(heights, Vector2i(x, y))
 
 
 func _is_grass(x: int, y: int) -> bool:
-	return heights[y * Generator.WIDTH + x] > sea_level + Generator.BEACH_LEVEL
+	return Rules.is_grass(heights, Vector2i(x, y))
 
 
 # One rule: a cliff is raised land dropping straight into water. Beaches never get one.
 func _is_cliff(x: int, y: int) -> bool:
-	return _is_land(x, y) and _is_grass(x, y) and not _is_land(x, y + 1)
+	return Rules.is_cliff(heights, Vector2i(x, y))

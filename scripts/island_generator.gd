@@ -1,21 +1,22 @@
 extends RefCounted
 
-const WIDTH := 64
-const HEIGHT := 48
-const BORDER := 3
-const MIN_LAND := 450
-const MAX_LAND := 1900
+const RESOLUTION := 2
+const WIDTH := 64 * RESOLUTION
+const HEIGHT := 48 * RESOLUTION
+const BORDER := 3 * RESOLUTION
+const MIN_LAND := 450 * RESOLUTION * RESOLUTION
+const MAX_LAND := 1900 * RESOLUTION * RESOLUTION
 const MAX_ATTEMPTS := 32
-const GENERATOR_VERSION := 3
+const GENERATOR_VERSION := 4
 const SEA_LEVEL := 0.0
 const BEACH_LEVEL := 0.12
 const SHALLOW_LEVEL := -0.20
 const COAST_EPSILON := 0.02
-const GENTLE_SLOPE := 0.032
-const STEEP_SLOPE := 0.20
-const COAST_ZONE := 6
-const SHALLOW_ZONE := 3
-const EXPOSURE_RADIUS := 6
+const GENTLE_SLOPE := 0.032 / RESOLUTION
+const STEEP_SLOPE := 0.20 / RESOLUTION
+const COAST_ZONE := 6 * RESOLUTION
+const SHALLOW_ZONE := 3 * RESOLUTION
+const EXPOSURE_RADIUS := 6 * RESOLUTION
 const DIRECTIONS := [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]
 
 
@@ -48,13 +49,13 @@ func _candidate(world_seed: int, attempt: int) -> PackedFloat32Array:
 	var terrain_seed := (world_seed ^ (attempt * 104729)) & 0x7fffffff
 	var rng := RandomNumberGenerator.new()
 	rng.seed = terrain_seed
-	var broad := _noise(terrain_seed, 0.022)
-	var landforms := _noise(terrain_seed ^ 0x68bc21eb, 0.045)
-	var detail := _noise(terrain_seed ^ 0x02e5be93, 0.11)
+	var broad := _noise(terrain_seed, 0.022 / RESOLUTION)
+	var landforms := _noise(terrain_seed ^ 0x68bc21eb, 0.045 / RESOLUTION)
+	var detail := _noise(terrain_seed ^ 0x02e5be93, 0.11 / RESOLUTION)
 	var offset := Vector2(rng.randf_range(100.0, 1000.0), rng.randf_range(100.0, 1000.0))
 	var center := Vector2(
-		(WIDTH - 1) * 0.5 + rng.randf_range(-5.0, 5.0),
-		(HEIGHT - 1) * 0.5 + rng.randf_range(-3.0, 3.0)
+		(WIDTH - 1) * 0.5 + rng.randf_range(-5.0, 5.0) * RESOLUTION,
+		(HEIGHT - 1) * 0.5 + rng.randf_range(-3.0, 3.0) * RESOLUTION
 	)
 	var radius := Vector2(
 		WIDTH * rng.randf_range(0.30, 0.47),
@@ -66,7 +67,7 @@ func _candidate(world_seed: int, attempt: int) -> PackedFloat32Array:
 	heights.resize(WIDTH * HEIGHT)
 	for y in range(HEIGHT):
 		for x in range(WIDTH):
-			var point := Vector2(x, y) + offset
+			var point := Vector2(x, y) + offset * RESOLUTION
 			var relative := (Vector2(x, y) - center).rotated(angle) / radius
 			var shape := (1.0 - relative.length_squared()) * 0.90
 			var height := (
@@ -144,7 +145,7 @@ func _condition_coast(heights: PackedFloat32Array, cells: PackedByteArray, world
 	# The coast is a slope. Sheltered shores slope gently, so the band just above sea
 	# level is wide (beach). Exposed shores slope steeply, so it is skipped (cliff).
 	var distance := _coast_distance(cells)
-	var rhythm := _noise(world_seed ^ 0x5bd1e995, 0.05)
+	var rhythm := _noise(world_seed ^ 0x5bd1e995, 0.05 / RESOLUTION)
 	# Measure steepness on the shoreline only, then carry it inland so each slope stays monotonic.
 	var steepness := PackedFloat32Array()
 	steepness.resize(cells.size())
@@ -179,15 +180,16 @@ func _condition_coast(heights: PackedFloat32Array, cells: PackedByteArray, world
 					heights[index] = maxf(heights[index], BEACH_LEVEL + 0.04)
 					continue
 				var slope := lerpf(GENTLE_SLOPE, STEEP_SLOPE, steepness[index])
-				var profile := maxf(SEA_LEVEL + COAST_EPSILON, d * slope)
+				# Refinement adds inland samples without lowering the original cliff lip.
+				var profile := maxf(SEA_LEVEL + COAST_EPSILON, (d + RESOLUTION - 1) * slope)
 				var inland := maxf(heights[index], BEACH_LEVEL + 0.04)
-				heights[index] = lerpf(profile, inland, smoothstep(3.0, float(COAST_ZONE), d))
+				heights[index] = lerpf(profile, inland, smoothstep(3.0 * RESOLUTION, float(COAST_ZONE), d))
 			elif on_rim or d > SHALLOW_ZONE:
 				# Shallows belong to the coast. Nothing light-blue may drift offshore.
 				heights[index] = minf(heights[index], SEA_LEVEL + SHALLOW_LEVEL - COAST_EPSILON)
 			else:
 				var shelter := 1.0 - smoothstep(0.55, 0.80, _water_fraction(cells, x, y))
-				heights[index] = -d * lerpf(0.11, 0.06, shelter)
+				heights[index] = -d * lerpf(0.11, 0.06, shelter) / RESOLUTION
 
 
 func _blur_shoreline(steepness: PackedFloat32Array, cells: PackedByteArray, distance: PackedInt32Array) -> void:
