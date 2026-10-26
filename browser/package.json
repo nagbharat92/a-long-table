@@ -1,0 +1,33 @@
+{
+  "name": "a-long-table-browser",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5185 --strictPort",
+    "build": "npm run fixtures:check && tsc --noEmit && vite build && node scripts/check-build.mjs",
+    "preview": "vite preview --host 127.0.0.1 --port 5186 --strictPort",
+    "test": "vitest run",
+    "test:browser": "playwright test",
+    "test:production": "npm run build && playwright test --config playwright.production.config.ts",
+    "check": "npm run test:production && npm test && npm run test:browser",
+    "fixtures:pack": "node scripts/pack-references.mjs",
+    "fixtures:check": "node scripts/pack-references.mjs --check",
+    "capture:previews": "node tests/capture-previews.mjs"
+  },
+  "dependencies": {
+    "easystarjs": "0.4.4",
+    "fastnoise-lite": "1.1.1",
+    "phaser": "4.2.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/node": "^22.0.0",
+    "typescript": "^6.0.3",
+    "vite": "8.3.4",
+    "vitest": "5.0.5"
+  }
+}
