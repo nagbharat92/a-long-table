@@ -7,6 +7,8 @@ import {
   GameSimulation,
 } from '../src/core/game';
 import { terrainAt } from '../src/core/world';
+import { HOP_DISTANCE, sampleRabbitMotion } from '../src/core/character-motion';
+import { rigPoint, transformRig, type RigPartId } from '../src/core/character-rig';
 
 function syntheticWorld(seed = 7): World {
   const width = 64;
@@ -99,9 +101,12 @@ describe('shared character animation', () => {
     });
   });
 
-  it('lifts only the visual body at the apex and squashes at landing', () => {
+  it('lifts only the visual body at the apex and softens squash on the delayed full-speed contact beat', () => {
     const character = createCharacter({ x: 64, y: 64 });
-    advanceCharacterAnimation(character, 0.2, 4.5, { x: 1, y: 0 }, true);
+    character.motionWeight = 1;
+    character.facing = 1;
+    character.direction = { x: 1, y: 0 };
+    character.hop = { phase: 0.42, speed: 22, active: true };
     const apex = characterPose(character);
     expect(apex.hop).toBeGreaterThan(1.8);
     expect(apex.scaleX).toBeLessThan(1);
@@ -109,11 +114,11 @@ describe('shared character animation', () => {
     expect(apex.rotation).toBeGreaterThan(0);
     expect(apex.rotation).toBeLessThanOrEqual(0.045);
     expect(character.position).toEqual({ x: 64, y: 64 });
-    advanceCharacterAnimation(character, 0.2, 4.5, { x: 1, y: 0 }, true);
+    advanceCharacterAnimation(character, (0.65 - 0.42) * HOP_DISTANCE / 22, 0, { x: 1, y: 0 }, false);
     const landing = characterPose(character);
     expect(landing.hop).toBeCloseTo(0, 12);
-    expect(landing.scaleX).toBeGreaterThan(1.1);
-    expect(landing.scaleY).toBeLessThan(0.9);
+    expect(landing.scaleX).toBeCloseTo(1.21, 12);
+    expect(landing.scaleY).toBeCloseTo(0.832, 12);
   });
 
   it('uses continuous travelled distance, not wall time, for the gait', () => {
@@ -147,14 +152,14 @@ describe('shared character animation', () => {
       expect(pose.scaleX).toBeCloseTo(expected.scaleX, 12);
       expect(pose.scaleY).toBeCloseTo(expected.scaleY, 12);
       expect(pose.rotation).toBeCloseTo(expected.rotation, 12);
-      expect(character.motionWeight).toBeCloseTo(1 - Math.exp(-16), 12);
+      expect(character.motionWeight).toBeCloseTo(1 - Math.exp(-10), 12);
     }
   });
 
   it('settles without an idle gait and blinks only in the last 0.14 seconds of 4.7', () => {
     const character = createCharacter({ x: 0, y: 0 });
     advanceCharacterAnimation(character, 0.2, 4.5, { x: 1, y: 0 }, true);
-    advanceCharacterAnimation(character, 1, 0, { x: 0, y: 0 }, false);
+    advanceCharacterAnimation(character, 3, 0, { x: 0, y: 0 }, false);
     expect(character.gaitDistance).toBe(4.5);
     expect(character.motionWeight).toBeLessThan(0.000001);
     expect(characterPose(character).hop).toBeLessThan(0.000001);
@@ -535,6 +540,33 @@ describe('selection and hit targets', () => {
       expect(game.characterHitTest(marker, zoom)).toBe(true);
     }
     expect(game.characterHitTest({ x: 200, y: 180 }, 8)).toBe(false);
+  });
+
+  it('keeps the articulated silhouette selectable throughout the hop in either direction', () => {
+    const { game } = gatherFixture();
+    const points: Record<RigPartId, Point> = {
+      body: { x: 4.5, y: 22.5 }, head: { x: 0.5, y: 12.5 },
+      'left-ear': { x: 5.5, y: 0.5 }, 'right-ear': { x: 11.5, y: 0.5 },
+      'left-arm': { x: 2.5, y: 23.5 }, 'right-arm': { x: 15.5, y: 23.5 },
+      'left-foot': { x: 4.5, y: 27.5 }, 'right-foot': { x: 13.5, y: 27.5 },
+    };
+    for (const facing of [-1, 1]) {
+      for (const phase of [0, 0.12, 0.24, 0.5, 0.72, 0.82, 0.94]) {
+        game.character.gaitDistance = phase * HOP_DISTANCE;
+        game.character.hop = { phase, speed: 22, active: true };
+        game.character.motionWeight = 1;
+        game.character.facing = facing;
+        const pose = sampleRabbitMotion(game.character);
+        const transforms = transformRig(pose.rig);
+        for (const [id, point] of Object.entries(points)) {
+          const p = rigPoint(pose.rig, transforms, id as RigPartId, point);
+          expect(game.characterHitTest({
+            x: game.character.position.x + (p.x - 9) * 12 / 29,
+            y: game.character.position.y + (p.y - 29) * 12 / 29 - pose.hop,
+          }, 8)).toBe(true);
+        }
+      }
+    }
   });
 
   it('chooses closest bush centers and still gathers adjacent bushes over enlarged character hits', () => {

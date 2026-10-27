@@ -2,8 +2,22 @@ import { describe, expect, it, vi } from 'vitest';
 import type Phaser from 'phaser';
 import type { BushState } from '../src/core/contracts';
 import { createCharacter } from '../src/core/game';
-import { ActorDrawing, BLINK_TEXTURE, RABBIT_TEXTURE } from '../src/render/actors';
+import { ActorDrawing } from '../src/render/actors';
 import { TerrainDrawing } from '../src/render/terrain';
+import type { Point } from '../src/core/contracts';
+import type { RabbitMotionPose } from '../src/core/character-motion';
+
+const { motionRender } = vi.hoisted(() => ({ motionRender: vi.fn() }));
+
+vi.mock('../src/render/rabbit-motion', () => ({
+  RabbitMotionDrawing: class {
+    private readonly image: Phaser.GameObjects.Image;
+    constructor(scene: Phaser.Scene) { this.image = scene.add.image(0, 0, 'articulated-rabbit'); }
+    setVisible(visible: boolean) { this.image.setVisible(visible); }
+    render(pose: RabbitMotionPose, foot: Point, depth: number) { motionRender(pose, foot, depth); }
+    destroy() { this.image.destroy(); }
+  },
+}));
 
 vi.mock('phaser', () => ({
   default: {
@@ -61,6 +75,7 @@ function sceneFixture() {
 }
 
 function actorFixture(characterLab = false) {
+  motionRender.mockClear();
   const fixture = sceneFixture();
   const actors = new ActorDrawing(fixture.scene, characterLab);
   const character = createCharacter({ x: 24, y: 32 });
@@ -185,21 +200,22 @@ describe('retained actor drawing', () => {
     expect(selection.setVisible).toHaveBeenLastCalledWith(false);
   });
 
-  it('changes rabbit textures only at blink boundaries', () => {
-    const { actors, character, images } = actorFixture(true);
-    const rabbit = images[0];
+  it('passes the same articulated pose and blink cadence to the retained motion renderer', () => {
+    const { actors, character } = actorFixture(true);
     actors.render(character, [], 2);
-    expect(rabbit.setTexture).not.toHaveBeenCalled();
+    expect(motionRender).toHaveBeenLastCalledWith(
+      expect.objectContaining({ face: expect.objectContaining({ blink: false }) }), character.position, 32.001,
+    );
     character.animationTime = 4.57;
     actors.render(character, [], 2);
-    expect(rabbit.setTexture).toHaveBeenCalledExactlyOnceWith(BLINK_TEXTURE);
+    expect(motionRender.mock.lastCall![0].face.blink).toBe(true);
     character.animationTime = 4.6;
     actors.render(character, [], 2);
-    expect(rabbit.setTexture).toHaveBeenCalledOnce();
+    expect(motionRender.mock.lastCall![0].face.blink).toBe(true);
     character.animationTime = 4.7;
     actors.render(character, [], 2);
-    expect(rabbit.setTexture).toHaveBeenLastCalledWith(RABBIT_TEXTURE);
-    expect(rabbit.setTexture).toHaveBeenCalledTimes(2);
+    expect(motionRender.mock.lastCall![0].face.blink).toBe(false);
+    expect(motionRender).toHaveBeenCalledTimes(4);
   });
 
   it('never shows selection or marker in the character lab', () => {

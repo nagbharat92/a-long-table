@@ -138,6 +138,34 @@ h1, h2, h3, p { margin: 0; }
 .toolbar label { font-size: 12px; }
 .toolbar .divider { width: 1px; height: 24px; background: var(--cp-border); margin: 0 4px; }
 .toolbar .spacer { flex: 1; }
+.runtime-compact .runtime-header h1 { min-width: 0; }
+.runtime-compact .toolbar { flex-wrap: nowrap; flex-shrink: 0; gap: 4px; margin-left: auto; padding: 0; border: 0; background: transparent; }
+.runtime-compact .toolbar button { min-width: 32px; padding: 7px 10px; }
+.explorer-playback { margin-top: 16px; }
+.explorer-playback button { flex: 1; }
+.character-tabs { margin-bottom: 20px; }
+.character-tabs button { flex: 1; }
+.motion-transport { align-items: end; margin-top: 20px; }
+.motion-transport label { display: grid; flex: 1; gap: 4px; font-size: 12px; }
+.motion-transport select { width: 100%; }
+.motion-transport button { flex: 1; }
+.rig-part-label { display: block; margin-bottom: 8px; font-size: 12px; }
+.rig-range { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; margin-top: 20px; font-size: 12px; }
+.rig-range output { color: var(--cp-text); font-variant-numeric: tabular-nums; }
+.rig-range input { grid-column: 1 / -1; width: 100%; min-height: 28px; margin: 0; padding: 0; accent-color: var(--cp-accent); cursor: pointer; }
+.rig-position-reset { margin-top: 8px; padding: 6px 8px; font-size: 12px; }
+.rig-toggles { margin-top: 20px; }
+.rig-toggles button { flex: 1; font-size: 12px; }
+.rig-audit { display: block; margin-top: 12px; font-size: 11px; color: var(--cp-text-muted); }
+.rig-audit.has-gaps { color: var(--cp-danger); }
+.rig-details { margin-top: 20px; font-size: 12px; }
+.rig-details summary { color: var(--cp-text-muted); cursor: pointer; }
+.rig-details summary:hover { color: var(--cp-text); }
+.rig-details summary:active { color: var(--cp-accent); }
+.rig-pivot-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 16px 0; }
+.rig-pivot-fields input { display: block; width: 100%; margin-top: 4px; }
+.inspector .rig-details p { margin-bottom: 12px; }
+.rig-reset { width: 100%; margin-top: 20px; }
 .badge { padding: 3px 8px; border: 1px solid var(--cp-border); border-radius: 6px; font-size: 11px; color: var(--cp-text-muted); }
 .runtime-body { display: flex; flex: 1; min-height: 0; }
 .stage { position: relative; flex: 1; min-width: 0; min-height: 240px; overflow: hidden; background: var(--cp-surface-soft); }
@@ -187,6 +215,10 @@ h1, h2, h3, p { margin: 0; }
   .inspector { width: 100%; max-height: 200px; border-left: none; border-top: 1px solid var(--cp-border); padding: 12px 16px; }
   .inspector section + section { margin-top: 12px; padding-top: 12px; }
   .inspector dl { margin-top: 8px; gap: 4px; }
+  .runtime[data-mode="character"] .inspector .stack { flex-direction: row; }
+  .runtime[data-mode="character"] .inspector .stack button { flex: 1; }
+  .runtime[data-mode="character"][data-character-tab="creation"] .inspector { max-height: 350px; }
+  .runtime[data-mode="character"][data-character-tab="motion"] .inspector { max-height: 360px; }
   .runtime-footer { padding: 8px 12px; align-items: flex-start; }
   .runtime-footer .provenance { max-width: 45%; }
 }

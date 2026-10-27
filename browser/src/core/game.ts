@@ -9,10 +9,10 @@ import type {
   World,
 } from './contracts';
 import { cellCenter, terrainAt } from './world';
+import { HOP_DISTANCE, HOP_TAKEOFF_PHASE, motionSourceBounds, sampleRabbitMotion } from './character-motion';
+import { dampedMotion } from './motion-clock';
 
 const MOVE_SPEED = 22;
-const HOP_DISTANCE = 9;
-const HOP_HEIGHT = 2;
 const INTEGRATION_STEP = 0.01;
 const APPROACH_DISTANCE = 8;
 const GATHER_SECONDS = 0.8;
@@ -68,6 +68,7 @@ export function createCharacter(position: Point, selected = false): CharacterSta
     animationTime: 0,
     motionWeight: 0,
     facing: 0,
+    hop: { phase: 0, speed: 0, active: false },
   };
 }
 
@@ -83,26 +84,55 @@ export function advanceCharacterAnimation(
   if (!Number.isFinite(travelled) || travelled < 0) {
     throw new RangeError('Travel distance must be finite and non-negative.');
   }
+  if (delta === 0) {
+    if (travelled > 0) throw new RangeError('Travel distance needs a positive animation delta.');
+    return;
+  }
+  const hop = character.hop;
+  if (!hop || !Number.isFinite(hop.phase) || hop.phase < 0 || hop.phase >= 1
+    || !Number.isFinite(hop.speed) || hop.speed < 0 || typeof hop.active !== 'boolean') {
+    throw new RangeError('The character hop clock is invalid.');
+  }
+  if (!moving && travelled === 0 && hop.active && hop.phase >= HOP_TAKEOFF_PHASE && hop.speed === 0) {
+    throw new RangeError('An airborne hop must have a positive cadence.');
+  }
   character.animationTime += delta;
   character.gaitDistance += travelled;
-  const blend = 1 - Math.exp(-delta * 16);
-  const targetWeight = moving || travelled > 0 ? 1 : 0;
-  character.motionWeight += (targetWeight - character.motionWeight) * blend;
-  character.facing += ((moving ? direction.x : 0) - character.facing) * blend;
-  if (moving || travelled > 0) character.direction = { ...direction };
+  const blendPose = (seconds: number, weight: number, facing: number): void => {
+    const blend = -Math.expm1(-seconds * 10);
+    character.motionWeight += (weight - character.motionWeight) * blend;
+    character.facing += (facing - character.facing) * blend;
+  };
+  if (moving || travelled > 0) {
+    const cadence = dampedMotion(hop.speed, travelled / delta, delta, 8);
+    hop.phase = (hop.phase + cadence.integral / HOP_DISTANCE) % 1;
+    hop.speed = cadence.value;
+    hop.active = true;
+    blendPose(delta, 1, direction.x);
+    character.direction = { ...direction };
+  } else if (hop.active && hop.phase >= HOP_TAKEOFF_PHASE) {
+    // Finish the existing flight and recovery, rather than fading a frozen midair pose.
+    const remaining = (1 - hop.phase) * HOP_DISTANCE / hop.speed;
+    const finish = Math.min(delta, remaining);
+    blendPose(finish, 1, character.direction.x);
+    if (delta < remaining) {
+      hop.phase += delta * hop.speed / HOP_DISTANCE;
+    } else {
+      hop.phase = 0;
+      hop.active = false;
+      hop.speed = dampedMotion(hop.speed, 0, delta - finish, 8).value;
+      blendPose(delta - finish, 0, 0);
+    }
+  } else {
+    hop.active = false;
+    hop.phase *= Math.exp(-delta * 10);
+    hop.speed = dampedMotion(hop.speed, 0, delta, 8).value;
+    blendPose(delta, 0, 0);
+  }
 }
 
 export function characterPose(character: CharacterState): CharacterPose {
-  const phase = ((character.gaitDistance / HOP_DISTANCE) % 1 + 1) % 1;
-  const airborne = Math.sin(Math.PI * phase);
-  const contact = (1 - airborne) ** 3 * character.motionWeight;
-  return {
-    hop: airborne * HOP_HEIGHT * character.motionWeight,
-    scaleX: 1 + contact * 0.13 - airborne * character.motionWeight * 0.035,
-    scaleY: 1 - contact * 0.12 + airborne * character.motionWeight * 0.045,
-    rotation: character.facing * 0.045 * character.motionWeight,
-    blink: character.animationTime % 4.7 > 4.56,
-  };
+  return sampleRabbitMotion(character).summary;
 }
 
 export class GameSimulation {
@@ -179,24 +209,12 @@ export class GameSimulation {
   characterHitTest(point: Point, zoom: number): boolean {
     checkPoint(point);
     checkZoom(zoom);
-    const pose = characterPose(this.character);
-    const halfWidth = (18 * 12) / 29 / 2;
-    const cosine = Math.cos(pose.rotation);
-    const sine = Math.sin(pose.rotation);
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const x of [-halfWidth, halfWidth]) {
-      for (const y of [-12, 0]) {
-        const transformedX = x * pose.scaleX * cosine - y * pose.scaleY * sine;
-        const transformedY = x * pose.scaleX * sine + y * pose.scaleY * cosine - pose.hop;
-        minX = Math.min(minX, transformedX);
-        maxX = Math.max(maxX, transformedX);
-        minY = Math.min(minY, transformedY);
-        maxY = Math.max(maxY, transformedY);
-      }
-    }
+    const pose = sampleRabbitMotion(this.character);
+    const bounds = motionSourceBounds(pose);
+    let minX = (bounds.x - 9) * 12 / 29;
+    let minY = (bounds.y - 29) * 12 / 29 - pose.hop;
+    let maxX = (bounds.x + bounds.width - 9) * 12 / 29;
+    let maxY = (bounds.y + bounds.height - 29) * 12 / 29 - pose.hop;
     const radius = Math.max(1.5, 3 / zoom);
     const markerY = -15 - radius - 2 / zoom + Math.sin(this.character.animationTime * 2.5) * 0.45;
     minX = Math.min(minX, -radius) - 0.5;

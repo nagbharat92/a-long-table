@@ -96,7 +96,7 @@ test('island elevation is separate, inspectable and deterministic', async ({ pag
 });
 
 test('character explorer switches shared motion without changing its ground position', async ({ page }) => {
-  await openMode(page, 'character');
+  await openMode(page, 'character?tab=motion');
   await page.getByRole('button', { name: 'Idle', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Idle', exact: true })).toHaveAttribute('aria-pressed', 'true');
   const position = await page.evaluate(() => ({ ...window.__longTable!.simulation.character.position }));
@@ -109,6 +109,60 @@ test('character explorer switches shared motion without changing its ground posi
   expect(await page.evaluate(() => window.__longTable!.view.getCameraState().zoom)).toBeLessThan(fitZoom);
   await page.getByRole('button', { name: 'Fit view', exact: true }).click();
   expect(await page.evaluate(() => window.__longTable!.view.getCameraState().zoom)).toBeCloseTo(fitZoom);
+});
+
+test('character explorer has one top bar and a minimal controls panel', async ({ page }) => {
+  await openMode(page, 'character?tab=motion&paused=1');
+  const header = page.locator('.runtime-header');
+  const inspector = page.getByRole('complementary', { name: 'Inspector' });
+  await expect(page.locator('.runtime > .toolbar')).toHaveCount(0);
+  await expect(header.locator('.toolbar')).toHaveCount(1);
+  await expect(page.locator('.runtime-footer')).toHaveCount(0);
+  await expect(header.getByRole('link', { name: 'Home', exact: true })).toBeVisible();
+  await expect(header.getByRole('heading', { name: 'Character Explorer', exact: true })).toBeVisible();
+  await expect(header.getByRole('button')).toHaveCount(3);
+  await expect(inspector).toHaveCount(1);
+  await expect(inspector.getByRole('heading')).toHaveText(['Motion']);
+  await expect(inspector.locator('p:visible, dl:visible')).toHaveCount(0);
+  const motion = inspector.getByRole('group', { name: 'Character motion', exact: true });
+  await expect(motion.getByRole('button')).toHaveText(['Idle', 'Hop', 'Shallows']);
+  await expect(motion.getByRole('button', { name: 'Hop', exact: true })).toHaveAttribute('aria-pressed', 'true');
+
+  const playback = inspector.getByRole('group', { name: 'Playback controls', exact: true });
+  await expect(playback.getByRole('button', { name: 'Resume', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await playback.getByRole('button', { name: 'Resume', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__longTable!.simulation.character.animationTime)).toBeGreaterThan(0);
+  await playback.getByRole('button', { name: 'Pause', exact: true }).click();
+  const pausedTime = await page.evaluate(() => window.__longTable!.simulation.character.animationTime);
+  await page.waitForTimeout(250);
+  expect(await page.evaluate(() => window.__longTable!.simulation.character.animationTime)).toBe(pausedTime);
+  await motion.getByRole('button', { name: 'Shallows', exact: true }).click();
+  await playback.getByRole('button', { name: 'Reset this explorer', exact: true }).click();
+  expect(await page.evaluate(() => window.__longTable!.simulation.character.animationTime)).toBe(0);
+  await expect(motion.getByRole('button', { name: 'Shallows', exact: true })).toHaveAttribute('aria-pressed', 'true');
+
+  for (const viewport of [{ width: 1280, height: 850 }, { width: 320, height: 780 }]) {
+    await page.setViewportSize(viewport);
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+    const geometry = await page.evaluate(() => {
+      const header = document.querySelector('.runtime-header')!.getBoundingClientRect();
+      const stage = document.querySelector('.stage')!.getBoundingClientRect();
+      return { headerBottom: header.bottom, stageTop: stage.top };
+    });
+    expect(geometry.stageTop).toBe(geometry.headerBottom);
+    await expect.poll(() => page.evaluate(() => {
+      const stage = document.querySelector('.stage')!.getBoundingClientRect();
+      const canvas = document.querySelector('canvas')!.getBoundingClientRect();
+      return Math.abs(stage.width - canvas.width);
+    })).toBeLessThanOrEqual(1);
+    for (const control of [header.getByRole('link', { name: 'Home', exact: true }), ...await header.getByRole('button').all(), ...await inspector.getByRole('button').all()]) {
+      await expect(control).toBeInViewport({ ratio: 1 });
+    }
+    expect(await inspector.evaluate((panel) => panel.scrollHeight <= panel.clientHeight)).toBe(true);
+  }
+  await page.getByRole('link', { name: 'Home', exact: true }).focus();
+  await page.keyboard.press('Tab');
+  await expect(header.getByRole('button', { name: 'Zoom out', exact: true })).toBeFocused();
 });
 
 test('foraging explorer uses the real gathering and regrowth simulation', async ({ page }) => {

@@ -2,8 +2,13 @@ import Phaser from 'phaser';
 import type { CharacterMode, DestinationId, Point, Rectangle, World } from '../core/contracts';
 import { advanceCharacterAnimation, type GameSimulation } from '../core/game';
 import { getWorldBounds, isCoastalCliff, terrainAt } from '../core/world';
-import { ActorDrawing, BLINK_TEXTURE, createBushTextures, RABBIT_TEXTURE, SOURCE_PIXEL_SCALE } from './actors';
+import { ActorDrawing, createBushTextures } from './actors';
+import { BLINK_TEXTURE, RABBIT_TEXTURE, SOURCE_PIXEL_SCALE } from './rabbit-texture';
+import { HOP_DISTANCE, RABBIT_MOTION_FRAME, sampleRabbitMotion, type RabbitMotionPose } from '../core/character-motion';
+import { dampedMotion } from '../core/motion-clock';
 import { OCEAN, TerrainDrawing } from './terrain';
+import { CharacterRigDrawing } from './character-rig';
+import { validateRigState, type CharacterRigState, type RigAudit, type RigPartId } from '../core/character-rig';
 
 export interface GameViewOptions {
   mode: DestinationId;
@@ -21,6 +26,14 @@ export interface GameView {
   setInspection(enabled: boolean): void;
   setNavigationOverlay(enabled: boolean): void;
   setCharacterMode(mode: CharacterMode): void;
+  setCharacterPlaybackSpeed(speed: number): void;
+  stepCharacterFrame(): void;
+  setCharacterHopPhase(phase: number): void;
+  getCharacterMotion(): RabbitMotionPose | null;
+  setCharacterRig(state: CharacterRigState | null): void;
+  getCharacterRig(): CharacterRigState | null;
+  getCharacterRigAudit(): RigAudit | null;
+  pickCharacterRigPart(point: Point): RigPartId | null;
   setPaused(paused: boolean): void;
   /** Coordinates are CSS pixels relative to the mount, not canvas backing pixels. */
   worldToScreen(point: Point): Point;
@@ -30,8 +43,8 @@ export interface GameView {
   destroy(): void;
 }
 
-const STEP = 1 / 60;
-const MAX_CATCHUP_STEPS = 5;
+const INSPECTION_FRAME_SECONDS = 1 / 60;
+const MAX_FRAME_SECONDS = 0.25;
 const STARTUP_TIMEOUT = 30000;
 const snapDown = (value: number) => value >= 1 ? Math.floor(value) : 1 / Math.ceil(1 / value);
 const snapUp = (value: number) => value >= 1 ? Math.ceil(value) : 1 / Math.max(1, Math.floor(1 / value));
@@ -103,13 +116,18 @@ class ViewController implements GameView {
   private simulation: GameSimulation;
   private bounds: Rectangle;
   private characterMode: CharacterMode = 'hop';
+  private characterPlaybackSpeed = 1;
+  private targetPlaybackSpeed = 1;
   private characterMagnification?: number;
+  private rigMagnification?: number;
+  private rigMaxMagnification = 1;
+  private rigState: CharacterRigState | null = null;
+  private rig?: CharacterRigDrawing;
   private paused = false;
   private destroyed = false;
   private hidden = document.hidden;
   private mountVisible = false;
   private following = false;
-  private accumulator = 0;
   private frameElapsed = 0;
   private skipDelta = true;
   private cssWidth = 0;
@@ -179,7 +197,6 @@ class ViewController implements GameView {
 
   private readonly onVisibility = () => this.guard(() => {
     this.hidden = document.hidden;
-    this.accumulator = 0;
     this.frameElapsed = 0;
     this.skipDelta = true;
     if (!this.hidden) this.resize();
@@ -229,7 +246,6 @@ class ViewController implements GameView {
     if (width <= 0 || height <= 0) {
       this.mountVisible = false;
       this.skipDelta = true;
-      this.accumulator = 0;
       return;
     }
     if (!this.mountVisible) this.skipDelta = true;
@@ -253,7 +269,6 @@ class ViewController implements GameView {
     this.zoom = snapDown(this.zoom / oldDpr * nextDpr);
     this.layoutCamera();
     this.skipDelta = true;
-    this.accumulator = 0;
   }
 
   private layoutCamera(): void {
@@ -261,14 +276,19 @@ class ViewController implements GameView {
     if (this.options.mode === 'character') {
       const availableWidth = Math.max(1, this.camera.width - 32 * this.dpr);
       const availableHeight = Math.max(1, this.camera.height - 32 * this.dpr);
+      const rigBounds = this.rigState ? this.rig!.getBounds() : null;
+      const rigWidth = rigBounds ? Math.max(58, 2 * Math.max(9 - rigBounds.x, rigBounds.x + rigBounds.width - 9)) : 58;
+      const rigHeight = rigBounds ? Math.max(72, 2 * Math.max(14.5 - rigBounds.y, rigBounds.y + rigBounds.height - 14.5)) : 72;
+      this.rigMaxMagnification = Math.max(1, Math.floor(Math.min(availableWidth / 58, availableHeight / 72)));
       const sourceMagnification = Math.max(1, Math.floor(Math.min(
-        availableWidth / (18 * 1.15),
-        availableHeight / (19 * (1 / SOURCE_PIXEL_SCALE)),
+        availableWidth / (this.rigState ? rigWidth : RABBIT_MOTION_FRAME.width),
+        availableHeight / (this.rigState ? rigHeight : RABBIT_MOTION_FRAME.height),
       )));
       this.fitZoom = sourceMagnification / SOURCE_PIXEL_SCALE;
-      const magnification = this.characterMagnification === undefined
+      const requested = this.rigState ? this.rigMagnification : this.characterMagnification;
+      const magnification = requested === undefined
         ? sourceMagnification
-        : Phaser.Math.Clamp(this.characterMagnification, 1, sourceMagnification);
+        : Phaser.Math.Clamp(requested, 1, this.rigState ? this.rigMaxMagnification : sourceMagnification);
       this.zoom = magnification / SOURCE_PIXEL_SCALE;
     } else {
       const margin = Math.min(24 * this.dpr, this.camera.width * 0.05, this.camera.height * 0.05);
@@ -292,7 +312,7 @@ class ViewController implements GameView {
     if (this.options.mode === 'character') {
       const foot = this.simulation.character.position;
       x = foot.x;
-      y = foot.y - 6;
+      y = foot.y + (this.rigState ? -14.5 : RABBIT_MOTION_FRAME.y + RABBIT_MOTION_FRAME.height / 2 - 29) * SOURCE_PIXEL_SCALE;
     } else if (this.following) {
       x = this.simulation.character.position.x;
       y = this.simulation.character.position.y;
@@ -318,21 +338,17 @@ class ViewController implements GameView {
       if (this.dpr !== density()) this.resize();
       const skip = this.skipDelta;
       this.skipDelta = false;
-      if (!this.paused && !this.hidden && this.mountVisible && !skip) {
-        const delta = Math.min(Math.max(0, deltaMilliseconds / 1000), STEP * MAX_CATCHUP_STEPS);
-        this.accumulator = Math.min(this.accumulator + delta, STEP * MAX_CATCHUP_STEPS);
-        // Discard excess wall time; never replay a background tab's elapsed time.
-        for (let step = 0; step < MAX_CATCHUP_STEPS && this.accumulator + 1e-10 >= STEP; step++) {
-          if (this.options.mode === 'character') {
-            const speed = this.characterMode === 'idle' ? 0 : this.characterMode === 'shallows' ? 9.9 : 22;
-            advanceCharacterAnimation(this.simulation.character, STEP, speed * STEP, { x: 1, y: 0 }, speed > 0);
-          } else {
-            this.simulation.advance(STEP);
-          }
-          this.accumulator = Math.max(0, this.accumulator - STEP);
+      if (!this.paused && !this.rigState && !this.hidden && this.mountVisible && !skip) {
+        const delta = Math.min(Math.max(0, deltaMilliseconds / 1000), MAX_FRAME_SECONDS);
+        if (this.options.mode === 'character') {
+          const speed = this.characterMode === 'idle' ? 0 : this.characterMode === 'shallows' ? 9.9 : 22;
+          const playback = dampedMotion(this.characterPlaybackSpeed, this.targetPlaybackSpeed, delta, 8);
+          this.characterPlaybackSpeed = playback.value;
+          advanceCharacterAnimation(this.simulation.character, playback.integral, speed * playback.integral, { x: 1, y: 0 }, speed > 0);
+        } else {
+          // GameSimulation already substeps elapsed time; rendering need not quantize poses to 60 Hz.
+          this.simulation.advance(delta);
         }
-      } else {
-        this.accumulator = 0;
       }
       if (!this.hidden && this.mountVisible) this.draw();
       this.frameElapsed += Math.min(Math.max(deltaMilliseconds / 1000, 0), 0.1);
@@ -348,14 +364,14 @@ class ViewController implements GameView {
 
   private draw(): void {
     this.positionCamera();
-    this.actors.render(this.simulation.character, this.simulation.bushes, this.zoom / this.dpr);
+    if (this.rigState) this.rig?.render(this.simulation.character.position, this.zoom / this.dpr);
+    else this.actors.render(this.simulation.character, this.simulation.bushes, this.zoom / this.dpr);
   }
 
   setSimulation(simulation: GameSimulation): void {
     this.assertAlive();
     this.simulation = simulation;
     this.bounds = simulationBounds(simulation);
-    this.accumulator = 0;
     this.skipDelta = true;
     this.lastPointer = undefined;
     this.terrain?.setWorld(simulation.world, simulation.navigation.speeds);
@@ -367,7 +383,8 @@ class ViewController implements GameView {
   fit(): void {
     this.assertAlive();
     this.following = false;
-    this.characterMagnification = undefined;
+    if (this.rigState) this.rigMagnification = undefined;
+    else this.characterMagnification = undefined;
     this.layoutCamera();
     this.draw();
   }
@@ -379,8 +396,11 @@ class ViewController implements GameView {
     if (this.options.mode === 'character') {
       const current = this.zoom * SOURCE_PIXEL_SCALE;
       const target = multiplier > 1 ? Math.ceil(current * multiplier) : Math.floor(current * multiplier);
-      this.characterMagnification = Phaser.Math.Clamp(target, 1, Math.round(this.fitZoom * SOURCE_PIXEL_SCALE));
-      this.zoom = this.characterMagnification / SOURCE_PIXEL_SCALE;
+      const magnification = Phaser.Math.Clamp(target, 1,
+        this.rigState ? this.rigMaxMagnification : Math.round(this.fitZoom * SOURCE_PIXEL_SCALE));
+      if (this.rigState) this.rigMagnification = magnification;
+      else this.characterMagnification = magnification;
+      this.zoom = magnification / SOURCE_PIXEL_SCALE;
       this.camera.setZoom(this.zoom);
       this.draw();
       return;
@@ -408,10 +428,81 @@ class ViewController implements GameView {
     this.characterMode = mode;
   }
 
+  setCharacterPlaybackSpeed(speed: number): void {
+    this.assertAlive();
+    if (this.options.mode !== 'character') throw new Error('Playback speed is only available in Character Explorer.');
+    if (![0.25, 0.5, 1].includes(speed)) throw new RangeError('Playback speed must be 0.25, 0.5 or 1.');
+    this.targetPlaybackSpeed = speed;
+    if (this.paused) this.characterPlaybackSpeed = speed;
+  }
+
+  stepCharacterFrame(): void {
+    this.assertAlive();
+    if (this.options.mode !== 'character' || this.rigState || !this.paused) throw new Error('Pause Motion before stepping a frame.');
+    const speed = this.characterMode === 'idle' ? 0 : this.characterMode === 'shallows' ? 9.9 : 22;
+    advanceCharacterAnimation(this.simulation.character, INSPECTION_FRAME_SECONDS, speed * INSPECTION_FRAME_SECONDS, { x: 1, y: 0 }, speed > 0);
+    this.draw();
+  }
+
+  setCharacterHopPhase(phase: number): void {
+    this.assertAlive();
+    if (this.options.mode !== 'character' || this.rigState || !this.paused) throw new Error('Pause Motion before inspecting a hop pose.');
+    if (this.characterMode === 'idle') throw new Error('Choose Hop or Shallows before inspecting its cycle.');
+    if (!Number.isFinite(phase) || phase < 0 || phase > 1) throw new RangeError('Hop phase must be between 0 and 1.');
+    this.simulation.character.gaitDistance = phase * HOP_DISTANCE;
+    this.simulation.character.hop = {
+      phase: phase % 1, speed: this.characterMode === 'shallows' ? 9.9 : 22, active: true,
+    };
+    this.simulation.character.motionWeight = 1;
+    this.simulation.character.facing = 1;
+    this.simulation.character.direction = { x: 1, y: 0 };
+    this.draw();
+  }
+
+  getCharacterMotion(): RabbitMotionPose | null {
+    this.assertAlive();
+    return this.rigState ? null : sampleRabbitMotion(this.simulation.character);
+  }
+
+  setCharacterRig(state: CharacterRigState | null): void {
+    this.assertAlive();
+    if (this.options.mode !== 'character') throw new Error('Character rigs are only available in Character Explorer.');
+    if (state) {
+      validateRigState(state);
+      this.rig ??= new CharacterRigDrawing(this.scene);
+      // Deforming a pose should not zoom the view; Fit reframes its current bounds explicitly.
+      if (this.rigState && this.rigMagnification === undefined) {
+        this.rigMagnification = this.zoom * SOURCE_PIXEL_SCALE;
+      }
+    }
+    this.rig?.setState(state);
+    this.rigState = state ? structuredClone(state) : null;
+    this.actors.setCharacterVisible(!state);
+    this.skipDelta = true;
+    this.scene.game.canvas.setAttribute('aria-label', state ? 'Character rig with selectable parts' : 'Animated pixel-art rabbit');
+    this.layoutCamera();
+    this.draw();
+  }
+
+  getCharacterRig(): CharacterRigState | null {
+    this.assertAlive();
+    return this.rigState ? structuredClone(this.rigState) : null;
+  }
+
+  getCharacterRigAudit(): RigAudit | null {
+    this.assertAlive();
+    return this.rigState ? this.rig!.getAudit() : null;
+  }
+
+  pickCharacterRigPart(point: Point): RigPartId | null {
+    this.assertAlive();
+    finitePoint(point);
+    return this.rigState ? this.rig!.hit(point, this.simulation.character.position) : null;
+  }
+
   setPaused(paused: boolean): void {
     this.assertAlive();
     this.paused = paused;
-    this.accumulator = 0;
     this.skipDelta = true;
   }
 
@@ -457,6 +548,7 @@ class ViewController implements GameView {
     this.scene.input.off(Phaser.Input.Events.POINTER_DOWN, this.onPointerDown);
     this.scene.input.off(Phaser.Input.Events.POINTER_MOVE, this.onPointerMove);
     this.actors.destroy();
+    this.rig?.destroy();
     this.terrain?.destroy();
     disposeGame(this.scene.game);
   }
@@ -548,6 +640,7 @@ export async function createGameView(container: HTMLElement, options: GameViewOp
         backgroundColor: OCEAN,
         // Phaser 4's pixelArt flag forces roundPixels, distorting scaled vertices.
         render: { pixelArt: false, roundPixels: false, antialias: false, antialiasGL: false },
+        fps: { smoothStep: false },
         scale: { mode: Phaser.Scale.NONE, autoRound: false },
         audio: { noAudio: true },
         input: { mouse: { preventDefaultWheel: false }, keyboard: false },

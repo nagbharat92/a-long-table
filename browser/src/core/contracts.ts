@@ -47,6 +47,11 @@ export interface CharacterState {
   animationTime: number;
   motionWeight: number;
   facing: number;
+  hop: {
+    phase: number;
+    speed: number;
+    active: boolean;
+  };
 }
 
 export interface CharacterPose {

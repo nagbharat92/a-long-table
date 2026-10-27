@@ -1,10 +1,7 @@
 import Phaser from 'phaser';
 import type { BushPhase, BushState, CharacterState } from '../core/contracts';
-import { characterPose } from '../core/game';
-
-export const SOURCE_PIXEL_SCALE = 12 / 29;
-export const RABBIT_TEXTURE = 'rabbit';
-export const BLINK_TEXTURE = 'rabbit-blink';
+import { sampleRabbitMotion } from '../core/character-motion';
+import { RabbitMotionDrawing } from './rabbit-motion';
 
 const CONTOUR = [
   [-6, -2], [-7, -4], [-7, -6], [-5, -6], [-5, -9], [-2, -9],
@@ -57,7 +54,7 @@ export function createBushTextures(scene: Phaser.Scene): void {
 }
 
 export class ActorDrawing {
-  private readonly rabbit: Phaser.GameObjects.Image;
+  private readonly rabbit: RabbitMotionDrawing;
   private readonly shadow: Phaser.GameObjects.Graphics;
   private readonly selection: Phaser.GameObjects.Graphics;
   private readonly marker: Phaser.GameObjects.Graphics;
@@ -66,7 +63,6 @@ export class ActorDrawing {
     new Phaser.Math.Vector2(), new Phaser.Math.Vector2(),
     new Phaser.Math.Vector2(), new Phaser.Math.Vector2(),
   ];
-  private blinking = false;
   private selected = false;
   private readonly bushes = new Map<string, {
     image: Phaser.GameObjects.Image;
@@ -83,9 +79,14 @@ export class ActorDrawing {
     this.shadow = scene.add.graphics();
     this.selection = scene.add.graphics()
       .lineStyle(0.5, 0xffe6a0, 0.7).strokeCircle(0, 0, 3).setVisible(false);
-    this.rabbit = scene.add.image(0, 0, RABBIT_TEXTURE).setOrigin(0.5, 1);
+    this.rabbit = new RabbitMotionDrawing(scene);
     this.marker = scene.add.graphics();
     this.route = scene.add.graphics().setDepth(-100);
+  }
+
+  setCharacterVisible(visible: boolean): void {
+    this.rabbit.setVisible(visible);
+    this.shadow.setVisible(visible);
   }
 
   replaceBushes(states: BushState[]): void {
@@ -144,16 +145,10 @@ export class ActorDrawing {
         drawing.progress = progress;
       }
     }
-    const pose = characterPose(character);
+    const pose = sampleRabbitMotion(character);
     const { x, y } = character.position;
     const lift = pose.hop / 2;
-    if (pose.blink !== this.blinking) {
-      this.rabbit.setTexture(pose.blink ? BLINK_TEXTURE : RABBIT_TEXTURE);
-      this.blinking = pose.blink;
-    }
-    this.rabbit.setPosition(x, y - pose.hop).setDepth(y + 0.001)
-      .setScale(SOURCE_PIXEL_SCALE * pose.scaleX, SOURCE_PIXEL_SCALE * pose.scaleY)
-      .setRotation(pose.rotation);
+    this.rabbit.render(pose, character.position, y + 0.001);
     this.shadow.clear().setPosition(x, y).setDepth(y - 0.03)
       .fillStyle(0x1f3629, 0.27 - lift * 0.09)
       .fillEllipse(0, 0.2, 4.7 * (1 - lift * 0.18), 4.7 * (0.36 - lift * 0.04));

@@ -31,6 +31,16 @@ test('production home stays lightweight and every destination runs from a projec
     await page.getByRole('link', { name: 'Home', exact: true }).click();
     await expect(page.locator('canvas')).toHaveCount(0);
   }
+  await page.goto('./#/character?tab=motion&paused=1');
+  await expect(page.getByRole('slider', { name: 'Hop cycle', exact: true })).toBeVisible();
+  await page.getByRole('slider', { name: 'Hop cycle', exact: true }).fill('24');
+  await page.getByRole('combobox', { name: 'Playback speed', exact: true }).selectOption('0.25');
+  await page.getByRole('button', { name: 'Step one frame', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Resume', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('alert')).toBeHidden();
+  expect(await page.evaluate(() => Object.hasOwn(window, '__longTable'))).toBe(false);
+  await page.getByRole('link', { name: 'Home', exact: true }).click();
+  await expect(page.locator('canvas')).toHaveCount(0);
   const resources = requests.filter(url => /\.(?:js|css|png)(?:\?|$)/.test(url));
   expect(resources.every(url => new URL(url).pathname.startsWith('/a-long-table/'))).toBe(true);
   expect(failures).toEqual([]);

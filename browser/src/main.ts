@@ -3,6 +3,7 @@ import './debug';
 import { destinations, destinationById } from './destinations';
 import type { CharacterMode, DestinationId, Point, World } from './core/contracts';
 import type { GameView } from './render/game-view';
+import type { CharacterCreation } from './character-creation';
 
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) throw new Error('The application mount is missing.');
@@ -109,8 +110,9 @@ async function renderRuntime(mode: DestinationId, parameters: URLSearchParams, r
   const entry = destinationById(mode);
   if (!entry) throw new Error(`Unknown destination: ${mode}`);
   const destination = entry;
+  const compact = mode === 'character';
   document.title = `${destination.title} · a long table`;
-  const runtime = element('main', { class: 'runtime', 'data-mode': mode });
+  const runtime = element('main', { class: compact ? 'runtime runtime-compact' : 'runtime', 'data-mode': mode });
   const header = element('header', { class: 'runtime-header' });
   const berries = element('output', { class: 'berries', 'aria-label': 'Berries' }, 'Berries 0');
   header.append(
@@ -118,12 +120,12 @@ async function renderRuntime(mode: DestinationId, parameters: URLSearchParams, r
     element('h1', {}, mode === 'play' ? 'a long table' : destination.title),
   );
   if (mode === 'play' || mode === 'foraging') header.append(berries);
-  else header.append(element('span', { class: 'brand' }, 'a long table'));
+  else if (!compact) header.append(element('span', { class: 'brand' }, 'a long table'));
   const error = element('div', { class: 'error-banner', role: 'alert', hidden: '' });
   const toolbar = element('div', { class: 'toolbar', 'aria-label': 'Explorer controls' });
   const body = element('div', { class: 'runtime-body' });
   const stage = element('div', { class: 'stage', 'aria-label': `${destination.title} canvas` });
-  const loading = element('div', { class: 'stage-loading', role: 'status' }, 'Opening the island…');
+  const loading = element('div', { class: 'stage-loading', role: 'status' }, mode === 'character' ? 'Opening character…' : 'Opening the island…');
   stage.append(loading);
   const inspector = element('aside', { class: 'inspector', 'aria-label': 'Inspector' });
   if (mode === 'play') inspector.hidden = true;
@@ -132,7 +134,11 @@ async function renderRuntime(mode: DestinationId, parameters: URLSearchParams, r
   const status = element('output', { 'aria-live': 'polite', role: 'status' }, destination.detail);
   const provenance = element('span', { class: 'provenance' });
   footer.append(status, provenance);
-  runtime.append(header, error, toolbar, body, footer);
+  runtime.append(header, error);
+  if (compact) header.append(toolbar);
+  else runtime.append(toolbar);
+  runtime.append(body);
+  if (!compact) runtime.append(footer);
   root.replaceChildren(runtime);
 
   function showError(cause: unknown): void {
@@ -143,12 +149,13 @@ async function renderRuntime(mode: DestinationId, parameters: URLSearchParams, r
   }
 
   try {
-    const [{ generateWorld, makeNavigationFixture, cellAt, terrainAt }, { Navigation }, { GameSimulation }, { createGameView }] =
+    const [{ generateWorld, makeNavigationFixture, cellAt, terrainAt }, { Navigation }, { GameSimulation }, { createGameView }, creationModule] =
       await Promise.all([
         import('./core/world'),
         import('./core/navigation'),
         import('./core/game'),
         import('./render/game-view'),
+        mode === 'character' ? import('./character-creation') : Promise.resolve(undefined),
       ]);
     if (revision !== routeRevision) return;
     const rawSeed = parameters.get('seed') ?? '42';
@@ -169,6 +176,12 @@ async function renderRuntime(mode: DestinationId, parameters: URLSearchParams, r
     let inspection = parameters.get('levels') === '1';
     let navigationOverlay = mode === 'navigation';
     let characterMode: CharacterMode = 'hop';
+    let characterTab: 'creation' | 'motion' = parameters.get('tab') === 'motion' ? 'motion' : 'creation';
+    let characterCreation: CharacterCreation | undefined;
+    let pauseButton: HTMLButtonElement | undefined;
+    let motionCycle: HTMLInputElement | undefined;
+    let motionBeat: HTMLOutputElement | undefined;
+    let motionPlaybackSpeed = 1;
     let brush = 'move';
     let hover: Point | null = null;
     let selectedBush = '';
@@ -186,6 +199,7 @@ async function renderRuntime(mode: DestinationId, parameters: URLSearchParams, r
     const updateUrl = (): void => {
       const next = new URLSearchParams();
       if (mode !== 'character') next.set('seed', String(seed));
+      if (mode === 'character' && characterTab === 'motion') next.set('tab', 'motion');
       if (mode === 'navigation') {
         next.set('fixture', navigationFixture ? 'test' : 'island');
         if (relief) next.set('relief', '1');
@@ -220,6 +234,15 @@ async function renderRuntime(mode: DestinationId, parameters: URLSearchParams, r
       if (routeOutput) updateText(routeOutput, String(Math.max(0, simulation.character.route.length - simulation.character.routeIndex)));
       if (selectedOutput) updateText(selectedOutput, simulation.character.selected ? 'Selected' : 'Not selected');
       if (clockOutput) updateText(clockOutput, `${(mode === 'character' ? simulation.character.animationTime : simulation.elapsed).toFixed(1)} s`);
+      if (motionCycle && motionBeat && characterTab === 'motion') {
+        const pose = view.getCharacterMotion();
+        if (pose) {
+          motionCycle.value = String(Math.min(99, Math.round(pose.phase * 100)));
+          motionCycle.disabled = characterMode === 'idle';
+          motionBeat.value = characterMode === 'idle' ? 'Idle' : pose.beat;
+          motionCycle.setAttribute('aria-valuetext', motionBeat.value);
+        }
+      }
       if (stateOutput) {
         const bush = simulation.bushes.find((candidate) => candidate.id === selectedBush);
         updateText(stateOutput, bush ? `${bush.state} · ${bush.regrowElapsed.toFixed(1)} / 20 s` : 'No bushes on this island');
@@ -318,7 +341,10 @@ async function renderRuntime(mode: DestinationId, parameters: URLSearchParams, r
         try {
           if (pointer.button !== 0) return;
           customStatus = '';
-          if (mode === 'character') return;
+          if (mode === 'character') {
+            characterCreation?.pick(point);
+            return;
+          }
           if (mode === 'navigation' && brush !== 'move') paint(point);
           else {
             const bush = simulation.bushAt(point, view.getCameraState().zoom);
@@ -380,7 +406,7 @@ async function renderRuntime(mode: DestinationId, parameters: URLSearchParams, r
       }
       regenerate(value);
     });
-    if (mode !== 'character') {
+    if (!compact) {
       seedForm.hidden = navigationFixture;
       newIsland.hidden = navigationFixture;
       toolbar.append(seedForm, newIsland);
@@ -408,24 +434,28 @@ async function renderRuntime(mode: DestinationId, parameters: URLSearchParams, r
       }, { 'aria-pressed': String(navigationOverlay) });
       toolbar.append(levels, paths);
     }
+    const playback = element('div', { class: 'row explorer-playback', role: 'group', 'aria-label': 'Playback controls' });
+    function setPaused(next: boolean): void {
+      paused = next;
+      if (pauseButton) {
+        pauseButton.textContent = paused ? 'Resume' : 'Pause';
+        pauseButton.setAttribute('aria-pressed', String(paused));
+      }
+      view.setPaused(paused);
+      updateUrl();
+    }
     if (mode !== 'play') {
-      toolbar.append(element('span', { class: 'spacer' }));
-      const pause = button(paused ? 'Resume' : 'Pause', () => {
-        paused = !paused;
-        pause.textContent = paused ? 'Resume' : 'Pause';
-        pause.setAttribute('aria-pressed', String(paused));
-        view.setPaused(paused);
-        updateUrl();
-      }, { 'aria-pressed': String(paused) });
-      toolbar.append(
-        pause,
-        button('Reset', () => regenerate(seed), { 'aria-label': 'Reset this explorer' }),
-      );
+      const pause = button(paused ? 'Resume' : 'Pause', () => setPaused(!paused), { 'aria-pressed': String(paused) });
+      pauseButton = pause;
+      const reset = button('Reset', () => regenerate(seed), { 'aria-label': 'Reset this explorer' });
+      if (compact) playback.append(pause, reset);
+      else toolbar.append(element('span', { class: 'spacer' }), pause, reset);
     }
 
-    function section(title: string, description: string): HTMLElement {
+    function section(title: string, description?: string): HTMLElement {
       const node = element('section');
-      node.append(element('h2', {}, title), element('p', {}, description));
+      node.append(element('h2', {}, title));
+      if (description) node.append(element('p', {}, description));
       inspector.append(node);
       return node;
     }
@@ -435,7 +465,11 @@ async function renderRuntime(mode: DestinationId, parameters: URLSearchParams, r
       return output;
     }
     if (mode === 'character') {
-      const controls = section('A closer look', 'The original 18 x 29 sprite. The same distance-driven motion as the game.');
+      const tabs = element('div', { class: 'row character-tabs', role: 'group', 'aria-label': 'Character workspace' });
+      inspector.append(tabs);
+      const creationPanel = element('div', { class: 'character-creation', role: 'region', 'aria-label': 'Character creation' });
+      inspector.append(creationPanel);
+      const controls = section('Motion');
       const modes = element('div', { class: 'stack', role: 'group', 'aria-label': 'Character motion' });
       const modeButtons = new Map<CharacterMode, HTMLButtonElement>();
       for (const [value, label] of [['idle', 'Idle'], ['hop', 'Hop'], ['shallows', 'Shallows']] as const) {
@@ -443,17 +477,73 @@ async function renderRuntime(mode: DestinationId, parameters: URLSearchParams, r
           characterMode = value;
           view.setCharacterMode(value);
           for (const [key, candidate] of modeButtons) candidate.setAttribute('aria-pressed', String(key === value));
+          updateReadouts();
         }, { 'aria-pressed': String(characterMode === value) });
         modeButtons.set(value, control);
         modes.append(control);
       }
-      controls.append(modes);
-      const details = section('Motion notes', 'Hopping lifts the artwork, not the ground position. Shallows slow the stride to 45%.');
-      const list = element('dl');
-      readout(list, 'Source', '18 x 29 px');
-      readout(list, 'World height', '12 units');
-      readout(list, 'Stride', '9 units');
-      details.append(list);
+      controls.append(modes, playback);
+      const transport = element('div', { class: 'row motion-transport' });
+      const speedLabel = element('label', {}, 'Speed');
+      const speed = element('select', { 'aria-label': 'Playback speed' });
+      for (const [value, label] of [['1', '1x'], ['0.5', '0.5x'], ['0.25', '0.25x']]) {
+        speed.append(element('option', { value }, label));
+      }
+      listen(speed, 'change', () => {
+        try {
+          view.setCharacterPlaybackSpeed(Number(speed.value));
+          motionPlaybackSpeed = Number(speed.value);
+          error.hidden = true;
+        } catch (cause) {
+          speed.value = String(motionPlaybackSpeed);
+          showError(cause);
+        }
+      });
+      speedLabel.append(speed);
+      const step = button('Frame', () => {
+        try {
+          setPaused(true);
+          view.stepCharacterFrame();
+          updateReadouts();
+          error.hidden = true;
+        } catch (cause) { showError(cause); }
+      }, { 'aria-label': 'Step one frame', title: 'Pause and advance 1/60 second of animation.' });
+      transport.append(speedLabel, step);
+      const cycle = element('label', { class: 'rig-range' });
+      motionBeat = element('output', { 'aria-live': 'off' });
+      motionCycle = element('input', {
+        type: 'range', min: '0', max: '99', step: '1', value: '0', 'aria-label': 'Hop cycle',
+      });
+      listen(motionCycle, 'input', () => {
+        try {
+          setPaused(true);
+          view.setCharacterHopPhase(Number(motionCycle!.value) / 100);
+          updateReadouts();
+          error.hidden = true;
+        } catch (cause) { showError(cause); }
+      });
+      cycle.append(element('span', {}, 'Cycle'), motionBeat, motionCycle);
+      controls.append(transport, cycle);
+      if (!creationModule) throw new Error('Character creation controls did not load.');
+      characterCreation = creationModule.mountCharacterCreation(
+        creationPanel, view, routeController.signal, showError, () => { error.hidden = true; },
+      );
+      const creationButton = button('Creation', () => switchTab('creation'));
+      const motionButton = button('Motion', () => switchTab('motion'));
+      tabs.append(creationButton, motionButton);
+      function switchTab(next: 'creation' | 'motion', writeUrl = true): void {
+        characterTab = next;
+        creationPanel.hidden = next !== 'creation';
+        controls.hidden = next !== 'motion';
+        creationButton.setAttribute('aria-pressed', String(next === 'creation'));
+        motionButton.setAttribute('aria-pressed', String(next === 'motion'));
+        runtime.dataset.characterTab = next;
+        if (next === 'creation') characterCreation!.activate();
+        else view.setCharacterRig(null);
+        updateReadouts();
+        if (writeUrl) updateUrl();
+      }
+      switchTab(characterTab, false);
     } else if (mode === 'foraging') {
       const controls = section('A berry patch', 'Choose a bush, then gather or inspect its growth state. Ground clicks cancel gathering.');
       bushSelect = element('select', { 'aria-label': 'Bush' });
@@ -521,16 +611,14 @@ async function renderRuntime(mode: DestinationId, parameters: URLSearchParams, r
       section('Highs and lows', 'Three land elevations, connected by natural ramps. Beaches stay low. Cliff faces block movement.');
       section('Explore, then approve', 'This relief remains an experiment. Opening it here does not add it to main gameplay.');
     }
-    if (mode !== 'play') {
+    if (mode !== 'play' && !compact) {
       const stats = section('This session', 'Reset starts this fixture again. Explorers do not change the game or one another.');
       const list = element('dl');
       clockOutput = readout(list, 'Simulation');
-      if (mode !== 'character') {
-        positionOutput = readout(list, 'Position');
-        routeOutput = readout(list, 'Waypoints');
-        selectedOutput = readout(list, 'Character');
-        generationOutput = readout(list, 'Generator');
-      }
+      positionOutput = readout(list, 'Position');
+      routeOutput = readout(list, 'Waypoints');
+      selectedOutput = readout(list, 'Character');
+      generationOutput = readout(list, 'Generator');
       stats.append(list);
     }
 
@@ -543,7 +631,10 @@ async function renderRuntime(mode: DestinationId, parameters: URLSearchParams, r
       const key = event as KeyboardEvent;
       if (key.target instanceof HTMLElement && key.target.closest('input, select, textarea, button')) return;
       if (key.ctrlKey || key.metaKey || key.altKey) return;
-      if (key.key.toLowerCase() === 'r') regenerate(navigationFixture || mode === 'character' ? seed : (seed + 7919) % 1000000);
+      if (key.key.toLowerCase() === 'r') {
+        if (mode === 'character' && characterTab === 'creation') characterCreation!.reset();
+        else regenerate(navigationFixture || mode === 'character' ? seed : (seed + 7919) % 1000000);
+      }
       else if (key.key.toLowerCase() === 'f') view.fit();
       else if (key.key === '+' || key.key === '=') view.zoomBy(1.5);
       else if (key.key === '-') view.zoomBy(1 / 1.5);
