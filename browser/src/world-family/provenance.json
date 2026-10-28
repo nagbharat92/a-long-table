@@ -1,0 +1,36 @@
+{
+  "capturedOn": "2026-10-28",
+  "landformGenerator": "landform-contrast-v3",
+  "source": "/Users/bharatnag/Documents/SideProjects/a-long-table-web/browser",
+  "integratedRenderer": {
+    "description": "Working-tree source snapshot, not an assertion that it is byte-identical to the independently frozen deployment.",
+    "unchangedDirectories": ["src/core", "src/fixtures"],
+    "renderDirectory": "src/render copied unchanged except namespaced rabbit asset URLs in render/game-view.ts",
+    "landformAdapter": "src/landform-study.ts: original generation, rendering, projections, probes, zoom, review storage and comparison logic; shell-facing DOM construction, lifecycle cleanup, namespaced assets and version URL adapted.",
+    "navigationAdapter": "src/main.ts terrain/navigation controls and fixture paint algorithm, integrated at source level into the pilot shell.",
+    "journal": "All seven entries and explanatory paragraphs from src/island-versions.ts, including the Space and proportion update.",
+    "algorithmSha256": {
+      "core/world.ts": "7c5f9640097a13fb6bc10f42388eb3bd165dd47a0b3bd7a962898837700d6d40",
+      "core/navigation.ts": "dd6ceb37efef93ae7e18618f238b6fe875b69b74935882c651c92c9f9d3fc5a0",
+      "core/game.ts": "ef1482d05e7217fab13dd22c876f26243ec8dd6df350d2b30a2fcfd1db31b547",
+      "core/landform-study.ts": "3ea2e4f05c86e084940e4a27e22121120e31ca699cef3310446e7c890096fc16",
+      "core/landform-generation.ts": "2ab866fb5ccf182bf2bbce8dc08864bc9f1f758912a4adfa7385abecdb0c0727",
+      "render/terrain.ts": "5ddfbdc8e0b23ff49201b426fa859f93f5bae565a84b23bbacf0c5d770469c35",
+      "render/landform-study.ts": "23719b6b3649acec04d2070a944965540c10c4b4ee00376555d45984e629ae4e"
+    }
+  },
+  "frozenV1": {
+    "source": "public/versions/island-v1",
+    "copy": "public/world-family/v1",
+    "description": "Unmodified complete deployed artifact, linked separately and explicitly from the integrated source renderer. No iframe or DOM-mutation adapter."
+  },
+  "runtimeAssets": [
+    "public/world-family/assets/rabbit.png",
+    "public/world-family/assets/rabbit-blink.png"
+  ],
+  "validation": {
+    "unit": "npx vitest run --config src/world-family/vitest.config.ts",
+    "browserFixture": "/src/world-family/fixture.html?mode=navigation",
+    "islandFixture": "/src/world-family/fixture.html?mode=island&version=v2"
+  }
+}

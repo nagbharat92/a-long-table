@@ -1,0 +1,43 @@
+.pt-stage {
+  position: absolute;
+  inset: 0;
+  font-family: "Trebuchet MS", sans-serif;
+}
+.pt-gallery {
+  position: absolute;
+  inset: 64px 32px;
+  width: auto;
+  height: auto;
+  align-items: center;
+}
+.pt-gallery canvas {
+  display: block;
+  max-width: none;
+  max-height: none;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+.pt-gallery figcaption {
+  padding: 3px 8px;
+  color: var(--game-deep);
+  font-weight: 700;
+}
+.pt-transport { align-items: center; flex-wrap: wrap; gap: 5px; }
+.pt-transport .p-button { padding: 8px 10px; min-height: 36px; font-size: 12px; }
+.pt-time { min-width: 62px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--game-muted); }
+.pt-content > .p-section { margin-top: 15px; }
+.pt-motion-grid { gap: 24px; }
+.pt-motion-grid .p-section { margin-top: 0; }
+.pt-motion-grid .p-label { margin-bottom: 6px; }
+.pt-motion-grid .p-choices .p-button { padding: 7px 10px; min-height: 32px; }
+.pt-direction { margin-top: 10px; }
+.pt-direction .p-label { margin-bottom: 0; }
+.pt-direction .p-button { min-height: 30px; padding: 6px 12px; }
+.pt-seed-label { display: grid; gap: 6px; flex: 1; }
+.pt-seed-label input { width: 100%; }
+@media (max-width: 1100px) {
+  .pt-gallery { inset: 32px 16px; gap: 12px; }
+}
+@media (max-width: 700px) {
+  .pt-gallery { inset: 20px 12px; gap: 18px; }
+}

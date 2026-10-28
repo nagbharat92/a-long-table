@@ -1,5 +1,5 @@
 import {
-  createCharacterRig, exportCharacterRig, localRigAngle, RABBIT_PARTS, RIG_HEIGHT, RIG_PART_SHAPE, RIG_POSITION_LIMIT, RIG_WIDTH, validateRigState,
+  characterRigRecipe, createCharacterRig, localRigAngle, RABBIT_PARTS, RIG_HEIGHT, RIG_PART_SHAPE, RIG_POSITION_LIMIT, RIG_WIDTH, validateRigState,
   type CharacterRigState, type RigPartId,
 } from './core/character-rig';
 import type { Point } from './core/contracts';
@@ -9,6 +9,7 @@ export interface CharacterCreation {
   pick(point: Point): void;
   activate(): void;
   reset(): void;
+  getState(): CharacterRigState;
 }
 
 export function mountCharacterCreation(
@@ -17,6 +18,7 @@ export function mountCharacterCreation(
   signal: AbortSignal,
   onError: (error: unknown) => void,
   onChange: () => void,
+  getCharacterRecipe?: () => object,
 ): CharacterCreation {
   let state = createCharacterRig();
   function node<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, attributes: Record<string, string> = {}): HTMLElementTagNameMap[K] {
@@ -35,6 +37,7 @@ export function mountCharacterCreation(
     change(next);
     validateRigState(next);
     view.setCharacterRig(next);
+    view.setCharacterSetup(next);
     state = next;
     onChange();
     sync();
@@ -133,7 +136,8 @@ export function mountCharacterCreation(
   rigData.append(note);
   const download = node('button', 'Download rig', { type: 'button' });
   listen(download, 'click', () => {
-    const url = URL.createObjectURL(new Blob([exportCharacterRig(state)], { type: 'application/json' }));
+    const recipe = { ...characterRigRecipe(state), character: getCharacterRecipe?.() };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(recipe, null, 2)], { type: 'application/json' }));
     const link = node('a', undefined, { href: url, download: 'rabbit-rig.json' });
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -184,6 +188,7 @@ export function mountCharacterCreation(
     audit.classList.toggle('has-gaps', state.explode === 0 && gaps.length > 0);
   }
   view.setCharacterRig(state);
+  view.setCharacterSetup(state);
   sync();
   return {
     pick(point) {
@@ -192,5 +197,6 @@ export function mountCharacterCreation(
     },
     activate() { view.setCharacterRig(state); sync(); },
     reset: resetRig,
+    getState: () => structuredClone(state),
   };
 }

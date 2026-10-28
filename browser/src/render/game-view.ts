@@ -8,7 +8,9 @@ import { HOP_DISTANCE, RABBIT_MOTION_FRAME, sampleRabbitMotion, type RabbitMotio
 import { dampedMotion } from '../core/motion-clock';
 import { OCEAN, TerrainDrawing } from './terrain';
 import { CharacterRigDrawing } from './character-rig';
-import { validateRigState, type CharacterRigState, type RigAudit, type RigPartId } from '../core/character-rig';
+import { characterSetup, validateRigState, type CharacterRigState, type RigAudit, type RigPartId } from '../core/character-rig';
+import type { CharacterArtwork } from '../core/character-definition';
+import type { CharacterAppearance } from '../core/character-appearance';
 
 export interface GameViewOptions {
   mode: DestinationId;
@@ -26,11 +28,15 @@ export interface GameView {
   setInspection(enabled: boolean): void;
   setNavigationOverlay(enabled: boolean): void;
   setCharacterMode(mode: CharacterMode): void;
+  setCharacterFacing(direction: -1 | 1): void;
   setCharacterPlaybackSpeed(speed: number): void;
   stepCharacterFrame(): void;
   setCharacterHopPhase(phase: number): void;
   getCharacterMotion(): RabbitMotionPose | null;
   setCharacterRig(state: CharacterRigState | null): void;
+  setCharacterAppearance(appearance: CharacterAppearance, artwork: CharacterArtwork): void;
+  getCharacterAppearance(): CharacterAppearance | null;
+  setCharacterSetup(state: CharacterRigState): void;
   getCharacterRig(): CharacterRigState | null;
   getCharacterRigAudit(): RigAudit | null;
   pickCharacterRigPart(point: Point): RigPartId | null;
@@ -123,6 +129,9 @@ class ViewController implements GameView {
   private rigMaxMagnification = 1;
   private rigState: CharacterRigState | null = null;
   private rig?: CharacterRigDrawing;
+  private artwork?: CharacterArtwork;
+  private appearance?: CharacterAppearance;
+  private setup?: CharacterRigState;
   private paused = false;
   private destroyed = false;
   private hidden = document.hidden;
@@ -149,7 +158,7 @@ class ViewController implements GameView {
     this.bounds = simulationBounds(this.simulation);
     this.camera = scene.cameras.main;
     this.camera.setRoundPixels(false).setBackgroundColor(options.mode === 'character' ? 0xe6ece3 : OCEAN);
-    if (options.mode !== 'character') this.terrain = new TerrainDrawing(scene);
+    if (options.mode !== 'character') this.terrain = new TerrainDrawing(scene, options.mode === 'island');
     this.actors = new ActorDrawing(scene, options.mode === 'character');
     this.observer = new ResizeObserver((entries) => this.guard(() => {
       const entry = entries.find((candidate) => candidate.target === this.container);
@@ -341,10 +350,9 @@ class ViewController implements GameView {
       if (!this.paused && !this.rigState && !this.hidden && this.mountVisible && !skip) {
         const delta = Math.min(Math.max(0, deltaMilliseconds / 1000), MAX_FRAME_SECONDS);
         if (this.options.mode === 'character') {
-          const speed = this.characterMode === 'idle' ? 0 : this.characterMode === 'shallows' ? 9.9 : 22;
           const playback = dampedMotion(this.characterPlaybackSpeed, this.targetPlaybackSpeed, delta, 8);
           this.characterPlaybackSpeed = playback.value;
-          advanceCharacterAnimation(this.simulation.character, playback.integral, speed * playback.integral, { x: 1, y: 0 }, speed > 0);
+          this.advanceCharacterMotion(playback.integral);
         } else {
           // GameSimulation already substeps elapsed time; rendering need not quantize poses to 60 Hz.
           this.simulation.advance(delta);
@@ -364,6 +372,7 @@ class ViewController implements GameView {
 
   private draw(): void {
     this.positionCamera();
+    this.terrain?.updateShoreline(this.simulation.elapsed);
     if (this.rigState) this.rig?.render(this.simulation.character.position, this.zoom / this.dpr);
     else this.actors.render(this.simulation.character, this.simulation.bushes, this.zoom / this.dpr);
   }
@@ -428,6 +437,17 @@ class ViewController implements GameView {
     this.characterMode = mode;
   }
 
+  setCharacterFacing(direction: -1 | 1): void {
+    this.assertAlive();
+    if (this.options.mode !== 'character') throw new Error('Facing controls are only available in Character Explorer.');
+    if (direction !== -1 && direction !== 1) throw new RangeError('Facing direction must be -1 or 1.');
+    const character = this.simulation.character;
+    character.facing *= direction * character.facingDirection;
+    character.facingDirection = direction;
+    character.direction.x = Math.abs(character.direction.x) * direction;
+    this.draw();
+  }
+
   setCharacterPlaybackSpeed(speed: number): void {
     this.assertAlive();
     if (this.options.mode !== 'character') throw new Error('Playback speed is only available in Character Explorer.');
@@ -439,9 +459,14 @@ class ViewController implements GameView {
   stepCharacterFrame(): void {
     this.assertAlive();
     if (this.options.mode !== 'character' || this.rigState || !this.paused) throw new Error('Pause Motion before stepping a frame.');
-    const speed = this.characterMode === 'idle' ? 0 : this.characterMode === 'shallows' ? 9.9 : 22;
-    advanceCharacterAnimation(this.simulation.character, INSPECTION_FRAME_SECONDS, speed * INSPECTION_FRAME_SECONDS, { x: 1, y: 0 }, speed > 0);
+    this.advanceCharacterMotion(INSPECTION_FRAME_SECONDS);
     this.draw();
+  }
+
+  private advanceCharacterMotion(seconds: number): void {
+    const speed = this.characterMode === 'idle' ? 0 : this.characterMode === 'shallows' ? 9.9 : 22;
+    advanceCharacterAnimation(this.simulation.character, seconds, speed * seconds,
+      { x: this.simulation.character.facingDirection, y: 0 }, speed > 0);
   }
 
   setCharacterHopPhase(phase: number): void {
@@ -454,14 +479,42 @@ class ViewController implements GameView {
       phase: phase % 1, speed: this.characterMode === 'shallows' ? 9.9 : 22, active: true,
     };
     this.simulation.character.motionWeight = 1;
-    this.simulation.character.facing = 1;
-    this.simulation.character.direction = { x: 1, y: 0 };
+    this.simulation.character.facing = this.simulation.character.facingDirection;
+    this.simulation.character.direction = { x: this.simulation.character.facingDirection, y: 0 };
     this.draw();
   }
 
   getCharacterMotion(): RabbitMotionPose | null {
     this.assertAlive();
-    return this.rigState ? null : sampleRabbitMotion(this.simulation.character);
+    return this.rigState ? null : sampleRabbitMotion(this.simulation.character, this.setup);
+  }
+
+  setCharacterAppearance(appearance: CharacterAppearance, artwork: CharacterArtwork): void {
+    this.assertAlive();
+    if (this.options.mode !== 'character') throw new Error('Character appearance is only available in Character Explorer.');
+    this.actors.setCharacterArtwork(artwork);
+    this.rig?.destroy();
+    this.rig = undefined;
+    this.artwork = artwork;
+    this.appearance = structuredClone(appearance);
+    if (this.rigState) {
+      this.rig = new CharacterRigDrawing(this.scene, artwork);
+      this.rig.setState(this.rigState);
+    }
+    this.draw();
+  }
+
+  getCharacterAppearance(): CharacterAppearance | null {
+    this.assertAlive();
+    return this.appearance ? structuredClone(this.appearance) : null;
+  }
+
+  setCharacterSetup(state: CharacterRigState): void {
+    this.assertAlive();
+    if (this.options.mode !== 'character') throw new Error('Character setup is only available in Character Explorer.');
+    this.setup = characterSetup(state);
+    this.actors.setCharacterSetup(this.setup);
+    this.draw();
   }
 
   setCharacterRig(state: CharacterRigState | null): void {
@@ -469,7 +522,7 @@ class ViewController implements GameView {
     if (this.options.mode !== 'character') throw new Error('Character rigs are only available in Character Explorer.');
     if (state) {
       validateRigState(state);
-      this.rig ??= new CharacterRigDrawing(this.scene);
+      this.rig ??= new CharacterRigDrawing(this.scene, this.artwork);
       // Deforming a pose should not zoom the view; Fit reframes its current bounds explicitly.
       if (this.rigState && this.rigMagnification === undefined) {
         this.rigMagnification = this.zoom * SOURCE_PIXEL_SCALE;

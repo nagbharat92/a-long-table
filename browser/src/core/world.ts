@@ -12,6 +12,7 @@ export const BEACH_LEVEL = 0.12;
 export const SHALLOW_LEVEL = -0.20;
 export const CLIFF_DEPTH = 5;
 export const GENERATOR_VERSION = 'browser-opensimplex2s-mulberry32-coast-v1';
+export const ISLAND_GENERATOR_VERSION = 'browser-seeded-highlands-v3';
 const BORDER = 6;
 const SIZE = WIDTH * HEIGHT;
 const CARDINAL: readonly Point[] = [
@@ -41,6 +42,19 @@ export function generateWorld(seed: number, options: { relief?: boolean } = {}):
   return world;
 }
 
+export function generateIslandWorld(seed: number): World {
+  const world = generateWorld(seed);
+  const shore = coastDistance(world.cells);
+  for (let variation = 0; variation < 24; variation++) {
+    const levels = islandReliefLevels(world, shore, variation);
+    if (!connectRelief(world, levels, variation, true)) continue;
+    world.generatorVersion = `${ISLAND_GENERATOR_VERSION}${BASELINES.has(seed) ? '-reference-coast' : ''}`;
+    world.provenance = 'browser-generated';
+    return world;
+  }
+  throw new Error(`Seeded highlands could not connect island elevations for seed ${seed} after 24 variations.`);
+}
+
 export function inBounds(world: World, cell: Point): boolean {
   return Number.isInteger(cell.x) && Number.isInteger(cell.y)
     && cell.x >= 0 && cell.y >= 0 && cell.x < world.width && cell.y < world.height;
@@ -48,6 +62,8 @@ export function inBounds(world: World, cell: Point): boolean {
 
 export function terrainAt(world: World, cell: Point): TerrainKind {
   if (!inBounds(world, cell)) return 'deep';
+  const rampId = world.rampIds?.[cell.y * world.width + cell.x] ?? -1;
+  if (rampId >= 0 && world.ramps?.[rampId]?.surface === 'sand') return 'sand';
   const height = world.heights[cell.y * world.width + cell.x] - world.seaLevel;
   return height > BEACH_LEVEL ? 'grass' : height > 0 ? 'sand'
     : height > SHALLOW_LEVEL ? 'shallow' : 'deep';
@@ -344,55 +360,120 @@ function reliefLevels(world: World, shore: Int32Array, variation: number): Uint8
   return Uint8Array.from(middle, (value, i) => high[i] ? 2 : value);
 }
 
+function islandReliefLevels(world: World, shore: Int32Array, variation: number): Uint8Array {
+  // Large-scale choices stay fixed across connectivity retries; only edge detail changes.
+  const rng = seededRandom(world.seed ^ 0x714a3f29);
+  const extent = rng();
+  const coverage = extent < 0.12 ? 0 : lerp(0.10, 0.62, (extent - 0.12) / 0.88);
+  if (!coverage) return new Uint8Array(SIZE);
+  const summit = rng();
+  const highShare = summit < 0.30 ? 0 : lerp(0.15, 0.50, (summit - 0.30) / 0.70);
+  const eligible: number[] = [];
+  for (let i = 0; i < SIZE; i++) {
+    if (world.heights[i] > BEACH_LEVEL && shore[i] >= 5) eligible.push(i);
+  }
+  if (!eligible.length) throw new Error(`Seed ${world.seed} has no interior for its highlands.`);
+  const xs = eligible.map(i => i % WIDTH), ys = eligible.map(i => Math.floor(i / WIDTH));
+  const spanX = Math.max(...xs) - Math.min(...xs) + 1;
+  const spanY = Math.max(...ys) - Math.min(...ys) + 1;
+  const masses = Array.from({ length: 1 + Math.floor(rng() * 3) }, () => {
+    const anchor = eligible[Math.floor(rng() * eligible.length)];
+    const angle = rng() * Math.PI * 2;
+    return {
+      x: anchor % WIDTH, y: Math.floor(anchor / WIDTH),
+      cosine: Math.cos(angle), sine: Math.sin(angle),
+      major: Math.max(spanX, spanY) * lerp(0.22, 0.65, rng()),
+      minor: Math.min(spanX, spanY) * lerp(0.16, 0.40, rng()),
+      height: lerp(0.85, 1.15, rng()),
+    };
+  });
+  const seed = (world.seed ^ (variation * 104729) ^ 0x25b7e1) & 0x7fffffff;
+  const broad = noise(seed, 0.035), detail = noise(seed ^ 0x39f12, 0.075);
+  const field = Float32Array.from({ length: SIZE }, (_, i) => {
+    const x = i % WIDTH, y = Math.floor(i / WIDTH);
+    let height = -Infinity;
+    for (const mass of masses) {
+      const dx = x - mass.x, dy = y - mass.y;
+      const along = (dx * mass.cosine + dy * mass.sine) / mass.major;
+      const across = (-dx * mass.sine + dy * mass.cosine) / mass.minor;
+      height = Math.max(height, mass.height - along * along - across * across);
+    }
+    return height + broad.GetNoise(x, y) * 0.20 + detail.GetNoise(x, y) * 0.04;
+  });
+  if (!field.every(Number.isFinite)) throw new Error(`Seed ${world.seed} produced invalid highland heights.`);
+  const samples = eligible.map(i => field[i]).sort((a, b) => a - b);
+  const middleThreshold = samples[Math.floor(samples.length * (1 - coverage))];
+  const middle = cleanMask(Uint8Array.from(field, (value, i) =>
+    Number(world.heights[i] > BEACH_LEVEL && shore[i] >= 5 && value >= middleThreshold)), 100);
+  const interior = coastDistance(middle);
+  const highThreshold = highShare ? samples[Math.floor(samples.length * (1 - coverage * highShare))] : Infinity;
+  const high = cleanMask(Uint8Array.from(field, (value, i) =>
+    Number(middle[i] && interior[i] >= 5 && value >= highThreshold)), 40);
+  return Uint8Array.from(middle, (value, i) => high[i] ? 2 : value);
+}
+
 function addRelief(world: World): void {
   const shore = coastDistance(world.cells);
   for (let variation = 0; variation < 12; variation++) {
     const levels = reliefLevels(world, shore, variation);
     if (levels.filter(level => level === 1).length < 100 || levels.filter(level => level === 2).length < 40) continue;
-    const walls = new Uint8Array(SIZE);
-    for (let i = 0; i < SIZE - WIDTH; i++) {
-      const depth = 2 * (levels[i] - levels[i + WIDTH]);
-      for (let d = 1; d <= depth && i + d * WIDTH < SIZE; d++) {
-        const next = i + d * WIDTH;
-        if (world.cells[next] && levels[next] < levels[i]) walls[next] = 1;
-      }
-    }
-    const areas = regions(Uint8Array.from(world.cells, (land, i) => Number(land && !walls[i])),
-      (from, to) => levels[from] === levels[to]);
-    const ids = new Int32Array(SIZE).fill(-1);
-    areas.forEach((area, id) => { for (const i of area) ids[i] = id; });
-    const candidates = rampCandidates(world, levels);
-    const rng = seededRandom(world.seed ^ (variation * 7919) ^ 0x137a49);
-    const ranked = candidates.map(ramp => ({
-      ramp, score: rng() + Number(ramp.direction.y === 1) + ramp.rect.width * ramp.rect.height * 0.02,
-    })).sort((a, b) => b.score - a.score);
-    const parents = areas.map((_, i) => i);
-    const root = (id: number): number => { while (parents[id] !== id) id = parents[id]; return id; };
-    const rampIds = new Int32Array(SIZE).fill(-1), ramps: Ramp[] = [];
-    let joins = 0;
-    for (const { ramp } of ranked) {
-      const upper = ids[ramp.highCell.y * WIDTH + ramp.highCell.x];
-      const lower = ids[ramp.lowCell.y * WIDTH + ramp.lowCell.x];
-      if (upper < 0 || lower < 0 || root(upper) === root(lower)) continue;
-      if (ramps.some(other => rectanglesOverlap(ramp.rect, other.rect, 1))) continue;
-      for (let y = ramp.rect.y; y < ramp.rect.y + ramp.rect.height; y++) {
-        for (let x = ramp.rect.x; x < ramp.rect.x + ramp.rect.width; x++) {
-          const i = y * WIDTH + x, area = ids[i];
-          rampIds[i] = ramps.length;
-          walls[i] = 0;
-          if (area >= 0 && root(upper) !== root(area)) { parents[root(area)] = root(upper); joins++; }
-        }
-      }
-      ramps.push(ramp);
-    }
-    if (joins !== areas.length - 1) continue;
-    world.elevations = levels;
-    world.cliffCells = walls;
-    world.rampIds = rampIds;
-    world.ramps = ramps;
-    return;
+    if (connectRelief(world, levels, variation)) return;
   }
   throw new Error(`Relief generation could not connect island elevations for seed ${world.seed} after 12 variations.`);
+}
+
+function connectRelief(world: World, levels: Uint8Array, variation: number, pathways = false): boolean {
+  const walls = new Uint8Array(SIZE);
+  for (let i = 0; i < SIZE - WIDTH; i++) {
+    const depth = 2 * (levels[i] - levels[i + WIDTH]);
+    for (let d = 1; d <= depth && i + d * WIDTH < SIZE; d++) {
+      const next = i + d * WIDTH;
+      if (world.cells[next] && levels[next] < levels[i]) walls[next] = 1;
+    }
+  }
+  const areas = regions(Uint8Array.from(world.cells, (land, i) => Number(land && !walls[i])),
+    (from, to) => levels[from] === levels[to]);
+  const ids = new Int32Array(SIZE).fill(-1);
+  areas.forEach((area, id) => { for (const i of area) ids[i] = id; });
+  const candidates = rampCandidates(world, levels, pathways, walls);
+  const clearance = pathways ? [0, 1, 2].map(level =>
+    coastDistance(Uint8Array.from(world.cells, (land, i) => Number(land && !walls[i] && levels[i] === level)))) : [];
+  const rng = seededRandom(world.seed ^ (variation * 7919) ^ 0x137a49);
+  const approachClearance = (ramp: Ramp) => Math.min(
+    clearance[ramp.upperLevel][(ramp.highCell.y - ramp.direction.y * 2) * WIDTH + ramp.highCell.x - ramp.direction.x * 2],
+    clearance[ramp.lowerLevel][(ramp.lowCell.y + ramp.direction.y * 2) * WIDTH + ramp.lowCell.x + ramp.direction.x * 2],
+  );
+  const ranked = candidates.map(ramp => ({
+    ramp, score: pathways
+      ? approachClearance(ramp) * 2
+        - Math.abs(ramp.lowCell.x - ramp.highCell.x) - Math.abs(ramp.lowCell.y - ramp.highCell.y) + rng() * 0.25
+      : rng() + Number(ramp.direction.y === 1) + ramp.rect.width * ramp.rect.height * 0.02,
+  })).sort((a, b) => b.score - a.score);
+  const parents = areas.map((_, i) => i);
+  const root = (id: number): number => { while (parents[id] !== id) id = parents[id]; return id; };
+  const rampIds = new Int32Array(SIZE).fill(-1), ramps: Ramp[] = [];
+  let joins = 0;
+  for (const { ramp } of ranked) {
+    const upper = ids[ramp.highCell.y * WIDTH + ramp.highCell.x];
+    const lower = ids[ramp.lowCell.y * WIDTH + ramp.lowCell.x];
+    if (upper < 0 || lower < 0 || root(upper) === root(lower)) continue;
+    if (ramps.some(other => rectanglesOverlap(ramp.rect, other.rect, pathways ? 3 : 1))) continue;
+    for (let y = ramp.rect.y; y < ramp.rect.y + ramp.rect.height; y++) {
+      for (let x = ramp.rect.x; x < ramp.rect.x + ramp.rect.width; x++) {
+        const i = y * WIDTH + x, area = ids[i];
+        rampIds[i] = ramps.length;
+        walls[i] = 0;
+        if (area >= 0 && root(upper) !== root(area)) { parents[root(area)] = root(upper); joins++; }
+      }
+    }
+    ramps.push(ramp);
+  }
+  if (joins !== areas.length - 1) return false;
+  world.elevations = levels;
+  world.cliffCells = walls;
+  world.rampIds = rampIds;
+  world.ramps = ramps;
+  return true;
 }
 
 function rectanglesOverlap(a: Rectangle, b: Rectangle, grow: number): boolean {
@@ -400,7 +481,7 @@ function rectanglesOverlap(a: Rectangle, b: Rectangle, grow: number): boolean {
     && a.y - grow < b.y + b.height && a.y + a.height + grow > b.y;
 }
 
-function rampCandidates(world: World, levels: Uint8Array): Ramp[] {
+function rampCandidates(world: World, levels: Uint8Array, pathways = false, walls?: Uint8Array): Ramp[] {
   const result: Ramp[] = [];
   const directions = [{ x: 0, y: 1 }, { x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: -1 }];
   for (let i = 0; i < SIZE; i++) {
@@ -410,9 +491,12 @@ function rampCandidates(world: World, levels: Uint8Array): Ramp[] {
       const next = { x: cell.x + direction.x, y: cell.y + direction.y };
       if (!inBounds(world, next) || levels[next.y * WIDTH + next.x] !== levels[i] - 1) continue;
       const side = { x: -direction.y, y: direction.x };
-      for (const radius of [2, 1]) {
+      const start = pathways ? -1 : -2;
+      // South-facing cliffs occupy two lower cells; the landing must clear both.
+      const end = pathways ? (direction.y === 1 ? 3 : 2) : 4;
+      for (const radius of pathways ? [1] : [2, 1]) {
         let valid = true;
-        for (let along = -2; along <= 4 && valid; along++) {
+        for (let along = start; along <= end && valid; along++) {
           for (let across = -radius; across <= radius; across++) {
             const p = { x: cell.x + direction.x * along + side.x * across,
               y: cell.y + direction.y * along + side.y * across };
@@ -421,14 +505,31 @@ function rampCandidates(world: World, levels: Uint8Array): Ramp[] {
           }
         }
         if (!valid) continue;
-        const first = { x: cell.x - direction.x * 2 - side.x * radius, y: cell.y - direction.y * 2 - side.y * radius };
-        const last = { x: cell.x + direction.x * 4 + side.x * radius, y: cell.y + direction.y * 4 + side.y * radius };
+        if (pathways) {
+          for (const landing of [start, end]) {
+            const outward = landing === start ? -1 : 1;
+            for (let step = 0; step <= 2 && valid; step++) {
+              for (let across = -radius - 1; across <= radius + 1; across++) {
+                const along = landing + outward * step;
+                const p = { x: cell.x + direction.x * along + side.x * across,
+                  y: cell.y + direction.y * along + side.y * across };
+                const index = p.y * WIDTH + p.x;
+                if (!inBounds(world, p) || world.heights[index] <= BEACH_LEVEL || walls?.[index]
+                  || levels[index] !== levels[i] - Number(landing === end)) { valid = false; break; }
+              }
+            }
+          }
+        }
+        if (!valid) continue;
+        const first = { x: cell.x + direction.x * start - side.x * radius, y: cell.y + direction.y * start - side.y * radius };
+        const last = { x: cell.x + direction.x * end + side.x * radius, y: cell.y + direction.y * end + side.y * radius };
         result.push({
+          ...(pathways ? { surface: 'sand' as const } : {}),
           rect: { x: Math.min(first.x, last.x), y: Math.min(first.y, last.y),
             width: Math.abs(last.x - first.x) + 1, height: Math.abs(last.y - first.y) + 1 },
           upperLevel: levels[i], lowerLevel: levels[i] - 1, direction,
-          highCell: { x: cell.x - direction.x * 2, y: cell.y - direction.y * 2 },
-          lowCell: { x: cell.x + direction.x * 4, y: cell.y + direction.y * 4 },
+          highCell: { x: cell.x + direction.x * start, y: cell.y + direction.y * start },
+          lowCell: { x: cell.x + direction.x * end, y: cell.y + direction.y * end },
         });
         break;
       }

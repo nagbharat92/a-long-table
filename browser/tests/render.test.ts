@@ -1,13 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
 import type Phaser from 'phaser';
-import type { BushState } from '../src/core/contracts';
+import type { BushState, World } from '../src/core/contracts';
 import { createCharacter } from '../src/core/game';
 import { ActorDrawing } from '../src/render/actors';
 import { TerrainDrawing } from '../src/render/terrain';
+import { drawIslandEdges } from '../src/render/island-edges';
+import { drawIslandGround } from '../src/render/island-ground';
+import { drawIslandShoreline } from '../src/render/island-shoreline';
+import { islandMaterials } from '../src/render/island-materials';
 import type { Point } from '../src/core/contracts';
 import type { RabbitMotionPose } from '../src/core/character-motion';
 
 const { motionRender } = vi.hoisted(() => ({ motionRender: vi.fn() }));
+
+vi.mock('../src/render/island-edges', () => ({ drawIslandEdges: vi.fn() }));
+vi.mock(import('../src/render/island-ground'), async importOriginal => ({
+  ...await importOriginal(),
+  drawIslandGround: vi.fn(),
+}));
+vi.mock('../src/render/island-shoreline', () => ({ drawIslandShoreline: vi.fn(() => ({ drawWater: vi.fn() })) }));
 
 vi.mock('../src/render/rabbit-motion', () => ({
   RabbitMotionDrawing: class {
@@ -21,6 +32,7 @@ vi.mock('../src/render/rabbit-motion', () => ({
 
 vi.mock('phaser', () => ({
   default: {
+    Textures: { FilterMode: { NEAREST: 0 } },
     Math: {
       Vector2: class {
         constructor(public x = 0, public y = 0) {}
@@ -249,5 +261,63 @@ describe('retained ocean drawing', () => {
     expect(waves.fillRect.mock.calls.length).toBeLessThanOrEqual(3200);
     terrain.destroy();
     expect(waves.destroy).toHaveBeenCalledOnce();
+  });
+
+  describe('terrain artwork scope', () => {
+    it('keeps new edges opt-in and restores the original Levels view', () => {
+      const context = { fillRect: vi.fn(), translate: vi.fn() };
+      vi.stubGlobal('document', { createElement: () => ({ getContext: () => context }) });
+      const world: World = {
+        width: 3, height: 3, tileSize: 4, seed: 0, seaLevel: 0,
+        generatorVersion: 'test', provenance: 'test-fixture',
+        heights: new Float32Array(9).fill(0.35), cells: new Uint8Array(9).fill(1),
+        elevations: new Uint8Array(9).fill(1),
+      };
+      const scene = {
+        add: { graphics: () => drawing(), image: () => drawing() },
+        textures: { addCanvas: () => ({ key: 'terrain', setFilter: vi.fn(), destroy: vi.fn(), refresh: vi.fn(), context }) },
+      } as unknown as Phaser.Scene;
+      vi.mocked(drawIslandEdges).mockClear();
+      vi.mocked(drawIslandGround).mockClear();
+      vi.mocked(drawIslandShoreline).mockClear();
+      try {
+        const standard = new TerrainDrawing(scene);
+        standard.setWorld(world, new Float32Array(9).fill(1));
+        expect(drawIslandEdges).not.toHaveBeenCalled();
+        expect(drawIslandGround).not.toHaveBeenCalled();
+        expect(drawIslandShoreline).not.toHaveBeenCalled();
+        const island = new TerrainDrawing(scene, true);
+        island.setWorld(world, new Float32Array(9).fill(1));
+        expect(drawIslandEdges).toHaveBeenCalledExactlyOnceWith(
+          context, world, ['#85cc49', '#99cf63', '#b5d982'], islandMaterials(world),
+        );
+        expect(drawIslandGround).toHaveBeenCalledExactlyOnceWith(context, world);
+        expect(drawIslandShoreline).toHaveBeenCalledExactlyOnceWith(context, world, vi.mocked(drawIslandEdges).mock.calls[0][3]);
+        const water = vi.mocked(drawIslandShoreline).mock.results[0].value!;
+        expect(water.drawWater).toHaveBeenCalledExactlyOnceWith(context, 0);
+        island.updateShoreline(0.04);
+        expect(water.drawWater).toHaveBeenCalledOnce();
+        island.updateShoreline(0.1);
+        expect(water.drawWater).toHaveBeenCalledTimes(2);
+        island.updateShoreline(0.1);
+        expect(water.drawWater).toHaveBeenCalledTimes(2);
+        island.setInspection(true);
+        island.updateShoreline(2);
+        expect(water.drawWater).toHaveBeenCalledTimes(2);
+        expect(drawIslandEdges).toHaveBeenCalledOnce();
+        expect(drawIslandGround).toHaveBeenCalledOnce();
+        expect(drawIslandShoreline).toHaveBeenCalledOnce();
+        island.setInspection(false);
+        expect(drawIslandEdges).toHaveBeenCalledTimes(2);
+        expect(drawIslandGround).toHaveBeenCalledTimes(2);
+        expect(drawIslandShoreline).toHaveBeenCalledTimes(2);
+        const restored = vi.mocked(drawIslandShoreline).mock.results[1].value!;
+        expect(restored.drawWater).toHaveBeenCalledExactlyOnceWith(context, 2);
+        standard.destroy();
+        island.destroy();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
   });
 });

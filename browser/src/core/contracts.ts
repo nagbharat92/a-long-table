@@ -13,6 +13,7 @@ export type DestinationId = 'play' | 'island' | 'character' | 'foraging' | 'navi
 export type CharacterMode = 'idle' | 'hop' | 'shallows';
 
 export interface Ramp {
+  surface?: 'sand';
   rect: Rectangle;
   upperLevel: number;
   lowerLevel: number;
@@ -47,6 +48,7 @@ export interface CharacterState {
   animationTime: number;
   motionWeight: number;
   facing: number;
+  facingDirection: -1 | 1;
   hop: {
     phase: number;
     speed: number;

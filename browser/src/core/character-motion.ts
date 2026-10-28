@@ -1,19 +1,21 @@
 import type { CharacterPose, CharacterState, Point, Rectangle } from './contracts';
 import {
-  createCharacterRig, RABBIT_PARTS, RIG_PART_SHAPE, rigPoint, transformRig,
-  type CharacterRigState, type RigPartId, type RigTransform,
+  createCharacterRig, RABBIT_PARTS, RIG_PART_SHAPE, RIG_POSITION_LIMIT, RIG_WIDTH, rigPoint, transformRig,
+  validateRigState, type CharacterRigState, type RigPartId, type RigTransform,
 } from './character-rig';
 import { rotateRigVector, solveRigEndpoint } from './character-kinematics';
 
 export const HOP_DISTANCE = 14;
 export const HOP_TAKEOFF_PHASE = 0.15;
 export const HOP_CONTACT_PHASE = 0.62;
+export const RABBIT_ARTWORK_FACING = -1;
 
 // Symmetric around the resting silhouette, with clearance for the entire hop.
 export const RABBIT_MOTION_FRAME: Rectangle = { x: -11, y: -14, width: 40, height: 57 };
 export const IDLE_BOB_SECONDS = 0.8;
 
 export interface RabbitMotionPose {
+  facingDirection: -1 | 1;
   phase: number;
   beat: string;
   hop: number;
@@ -224,15 +226,17 @@ function solveMotionFeet(
   }
 }
 
-export function sampleRabbitMotion(character: CharacterState): RabbitMotionPose {
-  const { gaitDistance, animationTime, motionWeight: weight, facing, hop: clock } = character;
+export function sampleRabbitMotion(character: CharacterState, setup?: CharacterRigState): RabbitMotionPose {
+  const { gaitDistance, animationTime, motionWeight: weight, facingDirection, hop: clock } = character;
+  const facing = character.facing * facingDirection * RABBIT_ARTWORK_FACING;
   if (!Number.isFinite(gaitDistance) || gaitDistance < 0
     || !Number.isFinite(animationTime) || animationTime < 0
     || !Number.isFinite(weight) || weight < 0 || weight > 1
     || !Number.isFinite(facing) || Math.abs(facing) > 1
+    || (facingDirection !== -1 && facingDirection !== 1)
     || !clock || !Number.isFinite(clock.phase) || clock.phase < 0 || clock.phase >= 1
     || !Number.isFinite(clock.speed) || clock.speed < 0 || typeof clock.active !== 'boolean') {
-    throw new RangeError('Rabbit motion needs finite non-negative distance/time, weight 0–1, facing -1–1, and a valid hop clock.');
+    throw new RangeError('Rabbit motion needs finite non-negative distance/time, weight 0–1, facing -1–1, facing direction -1 or 1, and a valid hop clock.');
   }
   const phase = clock.phase;
   const weighted = (value: number): number => weight === 0 ? 0 : value * weight;
@@ -290,9 +294,26 @@ export function sampleRabbitMotion(character: CharacterState): RabbitMotionPose 
     rig.parts[id].offset.y += (headBob - bob) * 0.15;
   }
   solveMotionFeet(rig, transforms, hop, response.arms, envelope);
+  if (setup) {
+    validateRigState(setup);
+    const defaults = createCharacterRig();
+    for (const part of RABBIT_PARTS) {
+      const pose = rig.parts[part.id], bind = setup.parts[part.id], initial = defaults.parts[part.id];
+      if (bind.pivot.x !== initial.pivot.x) pose.pivot.x = bind.pivot.x;
+      if (bind.pivot.y !== initial.pivot.y) pose.pivot.y = bind.pivot.y;
+      if (bind.offset.x) pose.offset.x = Math.max(-RIG_POSITION_LIMIT, Math.min(RIG_POSITION_LIMIT, pose.offset.x + bind.offset.x));
+      if (bind.offset.y) pose.offset.y = Math.max(-RIG_POSITION_LIMIT, Math.min(RIG_POSITION_LIMIT, pose.offset.y + bind.offset.y));
+      if (bind.angle) pose.angle = Math.max(-part.limit, Math.min(part.limit, pose.angle + bind.angle));
+      if (bind.squashStretch) pose.squashStretch = Math.max(-1, Math.min(1, pose.squashStretch + bind.squashStretch));
+    }
+  }
+  const composedBody = setup ? transformRig(rig).body : body;
   return {
-    phase, beat: motionBeat(phase, weight), hop, rig,
-    summary: { hop, scaleX: body.scale.x, scaleY: body.scale.y, rotation: body.angle, blink },
+    facingDirection, phase, beat: motionBeat(phase, weight), hop, rig,
+    summary: {
+      hop, scaleX: composedBody.scale.x, scaleY: composedBody.scale.y,
+      rotation: composedBody.angle === 0 ? 0 : composedBody.angle * facingDirection * RABBIT_ARTWORK_FACING, blink,
+    },
     face: {
       eyeScale: { x: 1 + (eyeX - 1) * weight, y: 1 + (eyeY - 1) * weight },
       eyeOffset: { x: weighted(gazeX * facing), y: weighted(gazeY) },
@@ -325,5 +346,8 @@ export function motionSourceBounds(pose: RabbitMotionPose): Rectangle {
       }
     }
   }
-  return { x: left, y: top, width: right - left, height: bottom - top };
+  return {
+    x: pose.facingDirection !== RABBIT_ARTWORK_FACING ? RIG_WIDTH - right : left,
+    y: top, width: right - left, height: bottom - top,
+  };
 }

@@ -78,6 +78,7 @@ export interface CharacterRigState {
 
 export interface RigLayer {
   id: RigPartId;
+  attachment?: 'accessory';
   pixels: Uint8ClampedArray;
   padding: Uint8ClampedArray;
   bounds: Rectangle;
@@ -115,7 +116,7 @@ export function sourceOwner(x: number, y: number): RigPartId {
   throw new RangeError('The source pixel is outside the rabbit rig.');
 }
 
-export function buildRigLayers(source: Uint8ClampedArray): RigLayer[] {
+export function buildRigLayers(source: Uint8ClampedArray, ownerAt = sourceOwner): RigLayer[] {
   if (source.length !== RIG_WIDTH * RIG_HEIGHT * 4) throw new Error('The rig source must be 18 by 29 RGBA pixels.');
   const fill = source.slice((10 * RIG_WIDTH + 7) * 4, (10 * RIG_WIDTH + 7) * 4 + 4);
   if (fill[3] !== 255) throw new Error('The rabbit joint fill sample must be opaque.');
@@ -133,7 +134,7 @@ export function buildRigLayers(source: Uint8ClampedArray): RigLayer[] {
       for (let x = 0; x < RIG_WIDTH; x++) {
         const index = (y * RIG_WIDTH + x) * 4;
         if (!source[index + 3]) continue;
-        const owner = sourceOwner(x, y);
+        const owner = ownerAt(x, y);
         const ownerIndex = RABBIT_PARTS.findIndex(candidate => candidate.id === owner);
         const matchesFill = fill.every((value, channel) => value === source[index + channel]);
         // Never repaint a foreground source pixel or expand the setup silhouette.
@@ -180,6 +181,11 @@ export function validateRigState(state: CharacterRigState): void {
       throw new RangeError(`The ${part.name.toLowerCase()} squash / stretch must be between -100% and 100%.`);
     }
   }
+}
+
+export function characterSetup(state: CharacterRigState): CharacterRigState {
+  validateRigState(state);
+  return { ...structuredClone(state), explode: 0, stress: 0, joints: false, padding: false };
 }
 
 function rotate(point: Point, angle: number): Point {
@@ -303,9 +309,9 @@ export function auditRig(state: CharacterRigState, layers: readonly RigLayer[], 
   return { restDifferencePixels, jointCount: joints.length, uncoveredJoints };
 }
 
-export function exportCharacterRig(state: CharacterRigState): string {
+export function characterRigRecipe(state: CharacterRigState) {
   validateRigState(state);
-  return JSON.stringify({
+  return {
     schemaVersion: 5,
     positioning: { space: 'parent', limit: RIG_POSITION_LIMIT },
     partShape: { ...RIG_PART_SHAPE, space: 'part-local', childArtwork: 'independent' },
@@ -319,5 +325,9 @@ export function exportCharacterRig(state: CharacterRigState): string {
       squashStretch: state.parts[part.id].squashStretch,
       scale: partShapeScale(state.parts[part.id].squashStretch),
     }])),
-  }, null, 2);
+  };
+}
+
+export function exportCharacterRig(state: CharacterRigState): string {
+  return JSON.stringify(characterRigRecipe(state), null, 2);
 }

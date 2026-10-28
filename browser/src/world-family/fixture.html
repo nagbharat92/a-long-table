@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>World family isolated regression fixture</title>
+  </head>
+  <body>
+    <script type="module">
+      import '../pilot/pilot.css';
+      import { createShell } from '../pilot/ui.ts';
+      import { mountWorldFamily } from '../pilot/world-family.ts';
+      const params = new URLSearchParams(location.search);
+      const mode = params.get('mode') === 'navigation' ? 'navigation' : 'island';
+      const lifecycle = new AbortController();
+      const shell = createShell(mode, lifecycle.signal);
+      document.body.append(shell.root);
+      try {
+        const controller = await mountWorldFamily(shell, params, mode);
+        window.worldFamilyFixture = { controller, shell, lifecycle };
+        document.documentElement.dataset.ready = 'true';
+      } catch (cause) {
+        shell.showError(cause);
+      }
+    </script>
+  </body>
+</html>

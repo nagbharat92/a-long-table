@@ -1,0 +1,54 @@
+.p-world-family {
+  --cp-landform-water: #52696a;
+  --cp-landform-top: #b6c693;
+  --cp-landform-light: #b8b59f;
+  --cp-landform-middle: #93988b;
+  --cp-landform-dark: #747f78;
+  --cp-landform-level-base: #d3d9b8;
+  --cp-landform-level-shelf: #a4bb8e;
+  --cp-landform-level-high: #708e78;
+  --cp-landform-annotation: #303e3a;
+}
+.p-world-version, .p-world-seed, .p-world-stack { display: grid; gap: 8px; min-width: 0; }
+.p-world-version { font-size: 13px; margin-bottom: 20px; }
+.p-world-family .p-world-status { display: block; font-size: 13px; color: var(--game-muted); margin-top: 12px; font-variant-numeric: tabular-nums; }
+.p-world-family .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+.p-world-family .p-session-controls .p-choices + .p-choices { margin-top: 10px; }
+.p-world-family .p-tools label { display: grid; gap: 6px; font-size: 13px; }
+.p-world-family .p-tools label + label { margin-top: 12px; }
+.p-world-family .p-tools section { min-width: 0; }
+.p-world-family textarea { width: 100%; resize: vertical; font: inherit; color: var(--game-paper); border: 1px solid var(--game-edge); background: var(--game-deep); padding: 8px; }
+.p-world-family textarea:focus-visible { outline: 3px solid var(--game-active); outline-offset: 3px; }
+.p-world-family .landform-checkbox { display: flex !important; align-items: center; gap: 8px; }
+.p-world-family .landform-checkbox input { width: 16px; height: 16px; accent-color: var(--game-active); }
+.p-world-family .landform-notes p, .p-world-family .landform-status, .p-world-family .landform-review-message { font-size: 13px; color: var(--game-muted); }
+.p-world-family .landform-notes p + p { margin-top: 12px; }
+.p-world-family .landform-status { display: block; margin-top: 12px; }
+.p-world-family .landform-generation-details pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
+.p-world-journal { font-size: 13px; }
+.p-world-journal summary { color: var(--game-active); }
+.p-world-journal section { margin-top: 16px; }
+.p-world-journal p { margin-top: 12px; color: var(--game-muted); }
+.p-world-journal table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; margin-top: 16px; }
+.p-world-journal th, .p-world-journal td { padding: 8px 4px; border-bottom: 1px solid var(--game-edge); vertical-align: top; text-align: left; overflow-wrap: anywhere; }
+.p-world-journal th:first-child { width: 25%; }
+.p-world-journal th:nth-child(2) { width: 20%; }
+.p-world-family .landform-stage { background: var(--cp-landform-water); }
+.p-world-family .landform-gallery { display: flex; width: 100%; height: 100%; }
+.p-world-family .landform-figure { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; margin: 0; }
+.p-world-family .landform-figure + .landform-figure { border-left: 1px solid var(--game-edge); }
+.p-world-family .landform-figure figcaption { flex-shrink: 0; padding: 12px 16px; color: var(--game-paper); background: var(--game-ink); font-size: 12px; }
+.p-world-family .landform-canvas-frame { display: grid; flex: 1; min-width: 0; min-height: 0; overflow: auto; }
+.p-world-family .landform-canvas-frame canvas { display: block; margin: auto; flex-shrink: 0; image-rendering: pixelated; }
+.p-world-family .landform-gallery[data-sheet="true"] { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: max-content; overflow: auto; align-content: start; }
+.p-world-family .landform-gallery[data-sheet="true"] .landform-figure { display: grid; grid-template-rows: auto auto 48px; border: 1px solid var(--game-edge); }
+.p-world-family .landform-gallery[data-sheet="true"] .landform-canvas-frame { display: block; overflow: visible; padding: 12px 0; }
+.p-world-family .landform-gallery[data-sheet="true"] .p-button { margin: 0 12px 12px; align-self: start; }
+@media (max-width: 1050px) {
+  .p-world-family .landform-gallery[data-sheet="true"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .p-world-family .landform-gallery[data-compare="true"] { flex-direction: column; }
+}
+@media (max-width: 700px) {
+  .p-world-family .landform-gallery[data-sheet="true"] { grid-template-columns: 1fr; }
+  .p-world-family .landform-figure figcaption { padding: 6px 12px; }
+}

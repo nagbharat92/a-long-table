@@ -7,13 +7,17 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 5185 --strictPort",
+    "dev": "node scripts/parallel-preview.mjs",
+    "dev:hot": "vite --host 127.0.0.1 --port 5187 --strictPort",
     "build": "npm run fixtures:check && tsc --noEmit && vite build && node scripts/check-build.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 5186 --strictPort",
     "test": "vitest run",
-    "test:browser": "playwright test",
+    "test:browser": "playwright test --config playwright.pilot.config.ts",
+    "test:pilot": "npm run test:browser",
+    "test:preview": "playwright test --config playwright.preview.config.ts",
+    "test:world-family": "vitest run --config src/world-family/vitest.config.ts",
     "test:production": "npm run build && playwright test --config playwright.production.config.ts",
-    "check": "npm run test:production && npm test && npm run test:browser",
+    "check": "npm run test:production && npm test && npm run test:world-family && npm run test:browser && npm run test:preview",
     "fixtures:pack": "node scripts/pack-references.mjs",
     "fixtures:check": "node scripts/pack-references.mjs --check",
     "capture:previews": "node tests/capture-previews.mjs"

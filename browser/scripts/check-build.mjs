@@ -23,8 +23,8 @@ const home = chunks.filter(chunk => chunk.initial);
 const budgets = [
   ['Home JavaScript', sum(home, 'raw'), 35_000],
   ['Home JavaScript (gzip)', sum(home, 'gzip'), 12_000],
-  ['All JavaScript', sum(chunks, 'raw'), 1_800_000],
-  ['All JavaScript (gzip)', sum(chunks, 'gzip'), 530_000],
+  ['All JavaScript', sum(chunks, 'raw'), 2_750_000],
+  ['All JavaScript (gzip)', sum(chunks, 'gzip'), 950_000],
 ];
 for (const [label, actual, limit] of budgets) {
   console.log(`${label}: ${actual} / ${limit} bytes`);

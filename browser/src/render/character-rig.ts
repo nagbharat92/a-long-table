@@ -5,26 +5,26 @@ import {
   type CharacterRigState, type RigAudit, type RigLayer, type RigPartId,
 } from '../core/character-rig';
 import { readRabbitPixels, SOURCE_PIXEL_SCALE } from './rabbit-texture';
-import { configureCharacterImage } from './character-image';
+import type { CharacterArtwork } from '../core/character-definition';
 
 export class CharacterRigDrawing {
   private readonly layers: RigLayer[];
   private readonly source: Uint8ClampedArray;
-  private readonly images = new Map<RigPartId, Phaser.GameObjects.Image>();
-  private readonly pads = new Map<RigPartId, Phaser.GameObjects.Image>();
+  private readonly images = new Map<string, Phaser.GameObjects.Image>();
+  private readonly pads = new Map<string, Phaser.GameObjects.Image>();
   private readonly guides: Phaser.GameObjects.Graphics;
   private state: CharacterRigState | null = null;
   private signature = '';
   private audit: RigAudit | null = null;
   private readonly accent: number;
 
-  constructor(private readonly scene: Phaser.Scene) {
-    this.source = readRabbitPixels(scene);
-    this.layers = buildRigLayers(this.source);
+  constructor(private readonly scene: Phaser.Scene, artwork?: CharacterArtwork) {
+    this.source = artwork?.source ?? readRabbitPixels(scene);
+    this.layers = artwork?.layers ?? buildRigLayers(this.source);
     this.accent = Phaser.Display.Color.HexStringToColor(getComputedStyle(document.documentElement).getPropertyValue('--cp-accent').trim()).color;
     for (const [index, layer] of this.layers.entries()) {
       for (const kind of ['part', 'padding'] as const) {
-        const key = `rig-${kind}-${layer.id}`;
+        const key = `rig-${kind}-${layer.attachment ?? layer.id}`;
         const textureCanvas = document.createElement('canvas');
         textureCanvas.width = RIG_WIDTH;
         textureCanvas.height = RIG_HEIGHT;
@@ -36,10 +36,9 @@ export class CharacterRigDrawing {
         const texture = scene.textures.addCanvas(key, textureCanvas);
         if (!texture) throw new Error(`Could not register the ${layer.id} rig texture.`);
         texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
-        const image = configureCharacterImage(scene.add.image(0, 0, key))
-          .setDepth(kind === 'part' ? index : 20 + index).setVisible(false);
+        const image = scene.add.image(0, 0, key).setDepth(kind === 'part' ? index : 20 + index).setVisible(false);
         if (kind === 'padding') image.setTint(this.accent).setAlpha(0.7);
-        (kind === 'part' ? this.images : this.pads).set(layer.id, image);
+        (kind === 'part' ? this.images : this.pads).set(layer.attachment ?? layer.id, image);
       }
     }
     this.guides = scene.add.graphics().setDepth(40);
@@ -87,15 +86,17 @@ export class CharacterRigDrawing {
     const guides = this.guides.clear();
     const lineWidth = 1 / zoom;
     for (const layer of this.layers) {
+      const key = layer.attachment ?? layer.id;
       const pose = state.parts[layer.id];
       const transform = transforms[layer.id];
       const position = world(transform.position);
-      for (const image of [this.images.get(layer.id)!, this.pads.get(layer.id)!]) {
+      for (const image of [this.images.get(key)!, this.pads.get(key)!]) {
         image.setPosition(position.x, position.y).setOrigin(pose.pivot.x / RIG_WIDTH, pose.pivot.y / RIG_HEIGHT)
           .setRotation(transform.angle).setScale(SOURCE_PIXEL_SCALE * transform.scale.x, SOURCE_PIXEL_SCALE * transform.scale.y);
       }
-      this.images.get(layer.id)!.setVisible(true);
-      this.pads.get(layer.id)!.setVisible(state.padding);
+      this.images.get(key)!.setVisible(true);
+      this.pads.get(key)!.setVisible(state.padding);
+      if (layer.attachment) continue;
       const part = RABBIT_PARTS.find(candidate => candidate.id === layer.id)!;
       if (state.joints) {
         if (part.parent) {
@@ -123,8 +124,8 @@ export class CharacterRigDrawing {
   destroy(): void {
     for (const image of [...this.images.values(), ...this.pads.values()]) image.destroy();
     for (const layer of this.layers) {
-      this.scene.textures.remove(`rig-part-${layer.id}`);
-      this.scene.textures.remove(`rig-padding-${layer.id}`);
+      this.scene.textures.remove(`rig-part-${layer.attachment ?? layer.id}`);
+      this.scene.textures.remove(`rig-padding-${layer.attachment ?? layer.id}`);
     }
     this.guides.destroy();
   }

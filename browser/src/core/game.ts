@@ -68,6 +68,7 @@ export function createCharacter(position: Point, selected = false): CharacterSta
     animationTime: 0,
     motionWeight: 0,
     facing: 0,
+    facingDirection: 1,
     hop: { phase: 0, speed: 0, active: false },
   };
 }
@@ -98,6 +99,10 @@ export function advanceCharacterAnimation(
   }
   character.animationTime += delta;
   character.gaitDistance += travelled;
+  // Keep the last heading at rest, on vertical routes and below visible horizontal speed.
+  if (travelled > 0 && Math.abs(direction.x * travelled / delta) > 0.05) {
+    character.facingDirection = direction.x < 0 ? -1 : 1;
+  }
   const blendPose = (seconds: number, weight: number, facing: number): void => {
     const blend = -Math.expm1(-seconds * 10);
     character.motionWeight += (weight - character.motionWeight) * blend;

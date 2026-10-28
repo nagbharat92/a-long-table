@@ -1,8 +1,9 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  cacheDir: '.cache/vite',
   base: './',
-  server: { host: '127.0.0.1', port: 5185, strictPort: true },
+  server: { host: '127.0.0.1', port: 5187, strictPort: true },
   preview: { host: '127.0.0.1', port: 5186, strictPort: true },
   build: {
     manifest: true,

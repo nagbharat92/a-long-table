@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { inflateSync } from 'node:zlib';
+import { approvedRabbitSource } from './helpers/rabbit-source';
 import type { CharacterState } from '../src/core/contracts';
 import {
   buildRigLayers, createCharacterRig, RABBIT_PARTS, rigPoint, transformRig, validateRigState,
@@ -15,7 +14,7 @@ import { advanceCharacterAnimation } from '../src/core/game';
 function character(overrides: Partial<CharacterState> = {}): CharacterState {
   return {
     position: { x: 20, y: 30 }, direction: { x: 0, y: 0 }, route: [], routeIndex: 0,
-    selected: false, gaitDistance: 0, animationTime: 0, motionWeight: 0, facing: 0,
+    selected: false, gaitDistance: 0, animationTime: 0, motionWeight: 0, facing: 0, facingDirection: -1,
     hop: { phase: 0, speed: 0, active: false },
     ...overrides,
   };
@@ -38,32 +37,6 @@ function expectNumbersClose(actual: unknown, expected: unknown, digits = 9): voi
   const values = numericValues(actual), other = numericValues(expected);
   expect(values.length).toBe(other.length);
   values.forEach((value, index) => expect(value).toBeCloseTo(other[index], digits));
-}
-
-function approvedRabbitSource(): Uint8ClampedArray {
-  const png = readFileSync(new URL('../public/assets/rabbit.png', import.meta.url));
-  expect([...png.subarray(16, 29)]).toEqual([0, 0, 0, 18, 0, 0, 0, 29, 8, 6, 0, 0, 0]);
-  const chunks: Buffer[] = [];
-  for (let offset = 8; offset < png.length;) {
-    const length = png.readUInt32BE(offset);
-    if (png.toString('ascii', offset + 4, offset + 8) === 'IDAT') chunks.push(png.subarray(offset + 8, offset + 8 + length));
-    offset += length + 12;
-  }
-  const encoded = inflateSync(Buffer.concat(chunks));
-  const pixels = new Uint8ClampedArray(18 * 29 * 4), stride = 18 * 4;
-  for (let y = 0; y < 29; y++) {
-    const filter = encoded[y * (stride + 1)];
-    for (let x = 0; x < stride; x++) {
-      const index = y * stride + x;
-      const a = x >= 4 ? pixels[index - 4] : 0, b = y ? pixels[index - stride] : 0;
-      const c = x >= 4 && y ? pixels[index - stride - 4] : 0;
-      const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
-      const predictor = [0, a, b, Math.floor((a + b) / 2), pa <= pb && pa <= pc ? a : pb <= pc ? b : c][filter];
-      if (predictor === undefined) throw new Error('Unsupported PNG row filter.');
-      pixels[index] = (encoded[y * (stride + 1) + x + 1] + predictor) % 256;
-    }
-  }
-  return pixels;
 }
 
 function silhouetteAudit(pose: RabbitMotionPose, layers: RigLayer[]): {

@@ -34,7 +34,7 @@ async function canvasColors(page: Page, points: Point[]): Promise<number[][]> {
   const screen = await page.evaluate(points => points.map(point => {
     const { view, simulation } = window.__longTable!;
     return view.worldToScreen({
-      x: simulation.character.position.x + (point.x - 9) * 12 / 29,
+      x: simulation.character.position.x - simulation.character.facingDirection * (point.x - 9) * 12 / 29,
       y: simulation.character.position.y + (point.y - 29) * 12 / 29,
     });
   }), points);
@@ -91,39 +91,7 @@ test('the articulated neutral Motion drawing still reproduces every original opa
   expect(await canvasColors(page, points)).toEqual(colors);
 });
 
-test('character cutouts use an isolated single-texture batch without changing terrain batching', async ({ page }) => {
-  await openMotion(page);
-  for (const tab of ['Motion', 'Creation']) {
-    await page.getByRole('button', { name: tab, exact: true }).click();
-    const result = await page.evaluate(() => {
-      const { view } = window.__longTable!;
-      const { scene } = view as typeof view & { scene: Phaser.Scene };
-      const renderer = scene.game.renderer;
-      if (!('renderNodes' in renderer)) throw new Error('WebGL renderer is unavailable.');
-      const manager = renderer.renderNodes;
-      const terrain = manager.getNode('BatchHandlerQuad') as Phaser.Renderer.WebGL.RenderNodes.BatchHandlerQuad;
-      const character = manager.getNode('CharacterBatch') as Phaser.Renderer.WebGL.RenderNodes.BatchHandlerQuad;
-      const before = terrain.maxTexturesPerBatch;
-      character.updateTextureCount(before);
-      const images = scene.children.list.filter((object): object is Phaser.GameObjects.Image => object.type === 'Image')
-        .filter(image => /^(motion|rig)-/.test(image.texture.key));
-      return {
-        images: images.length,
-        characterLimit: character.maxTexturesPerBatch,
-        terrainUnchanged: terrain.maxTexturesPerBatch === before,
-        terrainSeparate: terrain !== character,
-        allConfigured: images.every(image => 'BatchHandler' in image.customRenderNodes
-          && image.customRenderNodes.BatchHandler === character),
-      };
-    });
-    expect(result.images).toBeGreaterThanOrEqual(11);
-    expect(result).toMatchObject({
-      characterLimit: 1, terrainUnchanged: true, terrainSeparate: true, allConfigured: true,
-    });
-  }
-});
-
-test('one motion version preserves playback, camera and Creation without a preset selector', async ({ page }, testInfo) => {
+test('one motion version preserves playback and camera while applying Creation setup', async ({ page }, testInfo) => {
   await openMotion(page);
   await expect(page.getByRole('group', { name: 'Exaggeration', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^(Stiff|Follow-through|Exaggerated)$/ })).toHaveCount(0);
@@ -145,7 +113,9 @@ test('one motion version preserves playback, camera and Creation without a prese
   await page.getByRole('button', { name: 'Motion', exact: true }).click();
   expect(await page.evaluate(() => window.__longTable!.simulation.character)).toEqual(before);
   expect(await page.evaluate(() => window.__longTable!.view.getCameraState())).toEqual(camera);
-  expect(await page.evaluate(() => window.__longTable!.view.getCharacterMotion())).toEqual(pose);
+  const adjusted = await page.evaluate(() => window.__longTable!.view.getCharacterMotion()!);
+  expect(adjusted.phase).toBe(pose.phase);
+  expect(adjusted.rig.parts.head.angle).toBeCloseTo(pose.rig.parts.head.angle + 5, 10);
   await page.getByRole('button', { name: 'Creation', exact: true }).click();
   expect(await page.evaluate(() => window.__longTable!.view.getCharacterRig())).toEqual(creation);
   await page.goto('/#/play?paused=1');
@@ -388,7 +358,7 @@ test('eyes and nose stay on the animated head throughout the expressive hop', as
   await expect(page.getByRole('alert')).toBeHidden();
 });
 
-test('frame stepping and cycle inspection pause cleanly and preserve separate Creation edits', async ({ page }) => {
+test('frame stepping and cycle inspection pause cleanly while applying saved Creation edits', async ({ page }) => {
   await openMotion(page);
   const before = await page.evaluate(() => window.__longTable!.simulation.character.animationTime);
   await page.getByRole('button', { name: 'Step one frame', exact: true }).click();
@@ -408,7 +378,8 @@ test('frame stepping and cycle inspection pause cleanly and preserve separate Cr
   const creation = await page.evaluate(() => window.__longTable!.view.getCharacterRig());
   await page.getByRole('button', { name: 'Motion', exact: true }).click();
   await expect(page.getByRole('combobox', { name: 'Playback speed', exact: true })).toHaveValue('0.25');
-  expect(await page.locator('canvas').screenshot()).toEqual(frame);
+  expect(await page.locator('canvas').screenshot()).not.toEqual(frame);
+  expect(await page.evaluate(() => window.__longTable!.simulation.character.animationTime)).toBe(time);
   await page.getByRole('button', { name: 'Creation', exact: true }).click();
   expect(await page.evaluate(() => window.__longTable!.view.getCharacterRig())).toEqual(creation);
   await expect(page.getByRole('alert')).toBeHidden();

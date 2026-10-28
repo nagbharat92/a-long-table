@@ -1,6 +1,6 @@
 declare module 'fastnoise-lite' {
   export default class FastNoiseLite {
-    static readonly NoiseType: { readonly OpenSimplex2S: string };
+    static readonly NoiseType: { readonly OpenSimplex2S: string; readonly Perlin: string };
     static readonly FractalType: { readonly None: string };
     constructor(seed?: number);
     SetSeed(seed: number): void;

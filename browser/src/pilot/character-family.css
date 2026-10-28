@@ -1,0 +1,60 @@
+.p-character-family .cf-scene,
+.p-character-family .cf-preview { position: absolute; inset: 0; min-width: 0; min-height: 0; }
+.p-character-family .cf-scene > canvas { display: block; }
+.p-character-family .cf-preview { display: grid; place-items: center; background: var(--game-stage); }
+.p-character-family .customization-character { image-rendering: pixelated; max-width: 90%; max-height: 90%; object-fit: contain; }
+.p-character-family .p-loading { z-index: 2; }
+.p-character-family .cf-session { display: grid; gap: 12px; }
+.p-character-family .cf-session > .p-label { margin-bottom: 0; }
+.p-character-family .cf-session > .p-choices > button { flex: 1; }
+.p-character-family .cf-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
+.p-character-family .cf-tabs button { padding: 10px 4px; font-size: 12px; }
+.p-character-family .cf-tabs button[aria-pressed="true"]::before { display: none; }
+.p-character-family .cf-workspace { display: grid; gap: 20px; }
+.p-character-family .cf-workspace section,
+.p-character-family .customization-parameters { display: grid; gap: 16px; }
+.p-character-family .cf-workspace h2 { font-size: 15px; color: var(--game-muted); }
+.p-character-family .cf-workspace p { font-size: 13px; color: var(--game-muted); }
+.p-character-family .cf-workspace button {
+  min-height: 40px; padding: 9px 12px; border: 1px solid var(--game-edge); border-radius: 3px;
+  background: var(--game-ink); color: var(--game-paper); font: inherit; font-size: 13px; font-weight: 700;
+}
+.p-character-family .cf-workspace button:hover { background: var(--game-deep); border-color: var(--game-paper); }
+.p-character-family .cf-workspace button[aria-pressed="true"] { border-color: var(--game-active); color: var(--game-active); background: var(--game-deep); }
+.p-character-family .cf-workspace button:disabled { opacity: .48; cursor: not-allowed; }
+.p-character-family .cf-workspace input,
+.p-character-family .cf-workspace select { max-width: 100%; }
+.p-character-family .rig-range { display: grid; grid-template-columns: 1fr auto; gap: 6px; font-size: 13px; }
+.p-character-family .rig-range input { grid-column: 1 / -1; }
+.p-character-family .rig-range output,
+.p-character-family .color-field output { color: var(--game-muted); font-variant-numeric: tabular-nums; }
+.p-character-family .rig-part-label { font-size: 13px; }
+.p-character-family .rig-toggles,
+.p-character-family .cf-modes,
+.p-character-family .cf-transport { display: flex; flex-wrap: wrap; gap: 8px; }
+.p-character-family .cf-modes button,
+.p-character-family .cf-transport button { flex: 1; }
+.p-character-family .rig-audit { padding: 10px; background: var(--game-deep); border-left: 2px solid var(--game-edge); font-size: 13px; }
+.p-character-family .rig-audit.has-gaps { border-color: var(--game-error); color: var(--game-error); }
+.p-character-family .rig-details { border-top: 1px solid var(--game-edge); padding-top: 14px; font-size: 13px; }
+.p-character-family .rig-details[open] > summary { margin-bottom: 14px; }
+.p-character-family .rig-details p { margin-bottom: 12px; }
+.p-character-family .rig-pivot-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.p-character-family .cf-field { display: grid; gap: 6px; font-size: 13px; }
+.p-character-family .customization-parameters > section { border-bottom: 1px solid var(--game-edge); padding-bottom: 24px; }
+.p-character-family .customization-color-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.p-character-family .customization-color-heading output { color: var(--game-muted); font-size: 13px; }
+.p-character-family .color-swatches { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.p-character-family .color-swatches .color-swatch { display: flex; height: 44px; padding: 4px; overflow: hidden; }
+.p-character-family .color-swatch > span { flex: 1; height: 100%; }
+.p-character-family .color-field { display: grid; grid-template-columns: 42px 1fr auto; gap: 10px; align-items: center; font-size: 13px; }
+.p-character-family .ear-options,
+.p-character-family .expression-options,
+.p-character-family .accessory-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.p-character-family :is(.ear-options, .expression-options, .accessory-options) button { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.p-character-family .cf-thumbnail { image-rendering: pixelated; width: 36px; height: 58px; object-fit: contain; }
+.p-character-family .color-seed-form { display: flex; gap: 8px; align-items: end; }
+.p-character-family .color-seed-form label { display: grid; gap: 6px; font-size: 13px; min-width: 0; }
+.p-character-family .color-seed-form input { width: 100%; }
+.p-character-family .cf-display { margin-top: 24px; }
+.p-character-family .cf-display p { margin-top: 12px; }

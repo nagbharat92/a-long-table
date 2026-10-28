@@ -1,9 +1,15 @@
 import Phaser from 'phaser';
 import type { Point, Ramp, Rectangle, World } from '../core/contracts';
 import { isCoastalCliff, terrainAt } from '../core/world';
+import { drawSandySteps } from './sandy-steps';
+import { drawIslandSteps } from './island-steps';
+import { drawIslandEdges } from './island-edges';
+import { drawIslandGround, ISLAND_GRASS_COLORS } from './island-ground';
+import { drawIslandShoreline, type ShorelineAnimation } from './island-shoreline';
+import { islandMaterials } from './island-materials';
 
 export const OCEAN = 0x2698ee;
-const LEVELS = ['#85cc49', '#99cf63', '#b5d982'];
+const LEVELS = ISLAND_GRASS_COLORS;
 const INSPECTION = ['#80ae78', '#d4c47c', '#e8dcb7'];
 const EDGE = '#304a40';
 
@@ -29,6 +35,11 @@ export class TerrainDrawing {
   private texture?: Phaser.Textures.CanvasTexture;
   private overlay?: Phaser.GameObjects.Image;
   private overlayTexture?: Phaser.Textures.CanvasTexture;
+  private shoreline?: ShorelineAnimation;
+  private shorelineImage?: Phaser.GameObjects.Image;
+  private shorelineTexture?: Phaser.Textures.CanvasTexture;
+  private shorelineSeconds = 0;
+  private shorelineFrame = -1;
   private readonly waves: Phaser.GameObjects.Graphics;
   private readonly waveRegion = { left: NaN, top: NaN, right: NaN, bottom: NaN, stride: NaN };
   private inspection = false;
@@ -36,13 +47,14 @@ export class TerrainDrawing {
   private world?: World;
   private speeds?: Float32Array;
 
-  constructor(private readonly scene: Phaser.Scene) {
+  constructor(private readonly scene: Phaser.Scene, private readonly islandArtwork = false) {
     this.waves = scene.add.graphics().setDepth(-10000);
   }
 
   setWorld(world: World, speeds: Float32Array): void {
     this.world = world;
     this.speeds = speeds;
+    this.shorelineSeconds = 0;
     this.redraw();
     this.redrawNavigation();
   }
@@ -62,6 +74,13 @@ export class TerrainDrawing {
   private redraw(): void {
     const world = this.world;
     if (!world) return;
+    const detailed = this.islandArtwork && !this.inspection;
+    this.shorelineImage?.destroy();
+    this.shorelineTexture?.destroy();
+    this.shorelineImage = undefined;
+    this.shorelineTexture = undefined;
+    this.shoreline = undefined;
+    this.shorelineFrame = -1;
     this.image?.destroy();
     this.image = undefined;
     this.texture?.destroy();
@@ -92,7 +111,7 @@ export class TerrainDrawing {
     }
     for (let y = 0; y < world.height; y++) {
       for (let x = 0; x < world.width; x++) {
-        if (!isCoastalCliff(world, { x, y })) continue;
+        if (detailed || !isCoastalCliff(world, { x, y })) continue;
         const bottom = (y + 1) * tile;
         rect(x * tile, bottom, tile, 5, '#2387c7');
         rect(x * tile, bottom, tile, 4, EDGE);
@@ -105,10 +124,12 @@ export class TerrainDrawing {
         if (!land(x, y)) continue;
         const px = x * tile;
         const py = y * tile;
-        const grass = terrainAt(world, { x, y }) === 'grass';
+        const rampId = world.rampIds?.[y * world.width + x] ?? -1;
+        const grass = terrainAt(world, { x, y }) === 'grass'
+          || (rampId >= 0 && world.ramps?.[rampId]?.surface === 'sand');
         const color = grassColor(x, y);
         rect(px, py, tile, tile, grass ? color : '#e7cf85');
-        if (grass) {
+        if (grass && !detailed) {
           const value = ((x * 73856093) ^ (y * 19349663) ^ world.seed) & 0x7fffffff;
           const relief = Boolean(world.elevations);
           if (value % 41 === 0) rect(px, py, tile, tile, relief ? adjusted(color, 0.035) : '#8bd04d');
@@ -119,6 +140,7 @@ export class TerrainDrawing {
             rect(px + 2, py + 2, 1, 1, relief ? adjusted(color, 0.15) : '#b1df6b');
           }
         }
+        if (detailed) continue;
         const rim = grass ? EDGE : '#cdae63';
         if (!land(x, y - 1)) {
           rect(px, py, tile, 1, rim);
@@ -132,13 +154,19 @@ export class TerrainDrawing {
         }
       }
     }
+    if (world.elevations && detailed) {
+      drawIslandGround(context, world);
+      const materials = islandMaterials(world);
+      drawIslandEdges(context, world, LEVELS, materials);
+      this.shoreline = drawIslandShoreline(context, world, materials);
+    }
     if (world.elevations) {
       const directions: Point[] = [{ x: 0, y: -1 }, { x: -1, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 }];
       for (let y = 0; y < world.height; y++) {
         for (let x = 0; x < world.width; x++) {
           const index = y * world.width + x;
           const level = world.elevations[index];
-          if (!level) continue;
+          if (!level || detailed) continue;
           const px = x * tile;
           const py = y * tile;
           for (const direction of directions) {
@@ -175,6 +203,23 @@ export class TerrainDrawing {
     }
     this.texture = this.addTexture('terrain', canvas);
     this.image = this.scene.add.image(-1, -1, this.texture.key).setOrigin(0).setDepth(-9000);
+    if (this.shoreline) {
+      const water = document.createElement('canvas');
+      water.width = world.width * tile;
+      water.height = world.height * tile;
+      this.shorelineTexture = this.addTexture('shoreline', water);
+      this.shorelineImage = this.scene.add.image(0, 0, this.shorelineTexture.key).setOrigin(0).setDepth(-8999);
+      this.updateShoreline(this.shorelineSeconds);
+    }
+  }
+
+  updateShoreline(seconds: number): void {
+    this.shorelineSeconds = seconds;
+    const frame = Math.floor(seconds * 12);
+    if (!this.shoreline || !this.shorelineTexture || frame === this.shorelineFrame) return;
+    this.shoreline.drawWater(this.shorelineTexture.context, frame / 12);
+    this.shorelineTexture.refresh();
+    this.shorelineFrame = frame;
   }
 
   private drawRamp(context: CanvasRenderingContext2D, world: World, ramp: Ramp): void {
@@ -184,22 +229,27 @@ export class TerrainDrawing {
     const dy = lowCell.y - highCell.y;
     const lengthSquared = dx * dx + dy * dy;
     const tile = world.tileSize;
-    for (let y = rect.y; y < rect.y + rect.height; y++) {
-      for (let x = rect.x; x < rect.x + rect.width; x++) {
-        const progress = lengthSquared === 0 ? 0 : Phaser.Math.Clamp(((x - highCell.x) * dx + (y - highCell.y) * dy) / lengthSquared, 0, 1);
-        context.fillStyle = mixed(colors[upperLevel], colors[lowerLevel], progress);
-        context.fillRect(x * tile, y * tile, tile, tile);
+    if (ramp.surface === 'sand') {
+      if (this.islandArtwork && !this.inspection) drawIslandSteps(context, world, ramp);
+      else drawSandySteps(context, world, ramp);
+    } else {
+      for (let y = rect.y; y < rect.y + rect.height; y++) {
+        for (let x = rect.x; x < rect.x + rect.width; x++) {
+          const progress = lengthSquared === 0 ? 0 : Phaser.Math.Clamp(((x - highCell.x) * dx + (y - highCell.y) * dy) / lengthSquared, 0, 1);
+          context.fillStyle = mixed(colors[upperLevel], colors[lowerLevel], progress);
+          context.fillRect(x * tile, y * tile, tile, tile);
+        }
       }
+      const x = rect.x * tile;
+      const y = rect.y * tile;
+      const width = rect.width * tile;
+      const height = rect.height * tile;
+      context.fillStyle = '#d2e99a';
+      context.fillRect(x, y, direction.x === 0 ? 1 : width, direction.x === 0 ? height : 1);
+      context.fillStyle = '#6d9850';
+      if (direction.x === 0) context.fillRect(x + width - 1, y, 1, height);
+      else context.fillRect(x, y + height - 1, width, 1);
     }
-    const x = rect.x * tile;
-    const y = rect.y * tile;
-    const width = rect.width * tile;
-    const height = rect.height * tile;
-    context.fillStyle = '#d2e99a';
-    context.fillRect(x, y, direction.x === 0 ? 1 : width, direction.x === 0 ? height : 1);
-    context.fillStyle = '#6d9850';
-    if (direction.x === 0) context.fillRect(x + width - 1, y, 1, height);
-    else context.fillRect(x, y + height - 1, width, 1);
     if (this.inspection) {
       const start = { x: (highCell.x + 0.5) * tile, y: (highCell.y + 0.5) * tile };
       const end = { x: (lowCell.x + 0.5) * tile, y: (lowCell.y + 0.5) * tile };
@@ -279,6 +329,8 @@ export class TerrainDrawing {
   }
 
   destroy(): void {
+    this.shorelineImage?.destroy();
+    this.shorelineTexture?.destroy();
     this.image?.destroy();
     this.texture?.destroy();
     this.overlay?.destroy();

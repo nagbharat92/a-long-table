@@ -1,0 +1,31 @@
+.p-character-stage .p-character-rabbit {
+  image-rendering: pixelated;
+  flex: none;
+}
+.p-character-seed { color: var(--game-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.p-character-tray .p-character-tab { flex: 0 0 calc(50% - 4px); min-height: 46px; gap: 10px; }
+.p-character-tab canvas { image-rendering: pixelated; object-fit: contain; }
+.p-character-tray .p-section + .p-section { margin-top: 0; }
+.p-character-tray .p-section > .p-label { margin-bottom: 10px; }
+.p-character-palettes { gap: 8px; margin-bottom: 20px; }
+.p-character-palette { flex: 0 0 calc(33.333% - 6px); min-width: 0; padding: 7px 5px; flex-direction: column; font-size: 12px; }
+.p-character-palette[aria-pressed="true"]::before,
+.p-character-options .p-thumbnail[aria-pressed="true"]::before { display: none; }
+.p-character-chips { display: flex; width: 100%; height: 24px; border: 1px solid var(--game-edge); }
+.p-character-chips > span { flex: 1; }
+.p-character-color { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.p-character-color output { color: var(--game-muted); font: inherit; font-variant-numeric: tabular-nums; }
+.p-character-tray .p-character-options { gap: 8px; }
+.p-character-options .p-thumbnail { min-width: 78px; padding: 7px 9px; font-size: 12px; }
+.p-character-options .p-thumbnail[aria-pressed="true"] { outline: 1px solid var(--game-active); outline-offset: 2px; }
+.p-character-options + .p-muted, .p-character-tray .p-row + .p-muted { margin-top: 10px; }
+.p-character-tray .p-character-options + .p-row,
+.p-character-tray .p-character-ear-grid + .p-row { margin-top: 12px; }
+.p-character-ear-grid { grid-template-columns: 1fr; gap: 24px; }
+.p-character-ear-grid h3 { margin: 0 0 8px; }
+.p-character-ear-grid .p-thumbnail { min-width: 0; flex: 0 0 calc(50% - 4px); white-space: normal; }
+.p-character-seed-field { display: grid; gap: 6px; font-size: 13px; flex: 1; }
+.p-character-seed-field input { width: 100%; }
+.p-character-seed-field + .p-button { align-self: end; }
+.p-tools .p-character-seed-field ~ .p-button { flex: none; }
+.p-tools .p-section > .p-button { margin-top: 14px; }

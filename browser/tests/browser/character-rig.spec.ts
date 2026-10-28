@@ -77,6 +77,17 @@ async function downloadRig(page: Page): Promise<string> {
   return Buffer.concat(chunks).toString();
 }
 
+test('removed demo URLs fall back to Creation with only the existing character tabs', async ({ page }) => {
+  await page.goto('/#/character?tab=directions');
+  await page.waitForFunction(() => window.__longTable?.ready);
+  const tabs = page.locator('.character-tabs');
+  await expect(tabs.getByRole('button')).toHaveText(['Creation', 'Motion', 'Customization']);
+  await expect(page.getByRole('button', { name: 'Creation', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.runtime')).toHaveAttribute('data-character-tab', 'creation');
+  await expect(page.getByRole('combobox', { name: 'Character part' })).toBeVisible();
+  await expect(page.getByRole('alert')).toBeHidden();
+});
+
 test('creation has eight real parts, matches the original at rest, and freezes motion', async ({ page }) => {
   await openCreation(page);
   await expect(page.locator('canvas')).toHaveCount(1);

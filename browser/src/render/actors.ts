@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 import type { BushPhase, BushState, CharacterState } from '../core/contracts';
 import { sampleRabbitMotion } from '../core/character-motion';
 import { RabbitMotionDrawing } from './rabbit-motion';
+import type { CharacterArtwork } from '../core/character-definition';
+import type { CharacterRigState } from '../core/character-rig';
 
 const CONTOUR = [
   [-6, -2], [-7, -4], [-7, -6], [-5, -6], [-5, -9], [-2, -9],
@@ -54,7 +56,9 @@ export function createBushTextures(scene: Phaser.Scene): void {
 }
 
 export class ActorDrawing {
-  private readonly rabbit: RabbitMotionDrawing;
+  private rabbit: RabbitMotionDrawing;
+  private characterVisible = true;
+  private setup?: CharacterRigState;
   private readonly shadow: Phaser.GameObjects.Graphics;
   private readonly selection: Phaser.GameObjects.Graphics;
   private readonly marker: Phaser.GameObjects.Graphics;
@@ -85,8 +89,19 @@ export class ActorDrawing {
   }
 
   setCharacterVisible(visible: boolean): void {
+    this.characterVisible = visible;
     this.rabbit.setVisible(visible);
     this.shadow.setVisible(visible);
+  }
+
+  setCharacterArtwork(artwork: CharacterArtwork): void {
+    this.rabbit.destroy();
+    this.rabbit = new RabbitMotionDrawing(this.scene, artwork);
+    this.rabbit.setVisible(this.characterVisible);
+  }
+
+  setCharacterSetup(setup: CharacterRigState): void {
+    this.setup = structuredClone(setup);
   }
 
   replaceBushes(states: BushState[]): void {
@@ -145,7 +160,7 @@ export class ActorDrawing {
         drawing.progress = progress;
       }
     }
-    const pose = sampleRabbitMotion(character);
+    const pose = sampleRabbitMotion(character, this.setup);
     const { x, y } = character.position;
     const lift = pose.hop / 2;
     this.rabbit.render(pose, character.position, y + 0.001);

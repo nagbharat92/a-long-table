@@ -3,7 +3,7 @@ import type { Point } from '../../src/core/contracts';
 import '../../src/debug';
 
 async function openMode(page: Page, mode: string): Promise<void> {
-  await page.goto(`/#/${mode}`);
+  await page.goto(`/${mode.startsWith('island') ? '?islandEmbed=v2' : ''}#/${mode}`);
   await expect(page.locator('canvas')).toHaveCount(1);
   await page.waitForFunction(() => window.__longTable?.ready === true);
   await expect(page.getByRole('alert')).toBeHidden();
@@ -73,7 +73,7 @@ test('Play uses reference terrain without experimental relief and accepts mapped
 });
 
 test('island elevation is separate, inspectable and deterministic', async ({ page }) => {
-  await openMode(page, 'island?seed=42');
+  await openMode(page, 'island?seed=43');
   const baseline = await page.evaluate(() => {
     const world = window.__longTable!.world;
     return {
@@ -81,6 +81,7 @@ test('island elevation is separate, inspectable and deterministic', async ({ pag
       elevations: Array.from(new Set(world.elevations)),
       ramps: world.ramps?.length ?? 0,
       samples: Array.from(world.heights.slice(1000, 1020)),
+      levels: Array.from(world.elevations!),
     };
   });
   expect(baseline.elevations.sort()).toEqual([0, 1, 2]);
@@ -89,10 +90,11 @@ test('island elevation is separate, inspectable and deterministic', async ({ pag
   await expect(page.getByRole('button', { name: 'Levels', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('button', { name: 'Reset this explorer' }).click();
   expect(await page.evaluate(() => Array.from(window.__longTable!.world.heights.slice(1000, 1020)))).toEqual(baseline.samples);
+  expect(await page.evaluate(() => Array.from(window.__longTable!.world.elevations!))).toEqual(baseline.levels);
   await page.getByRole('spinbutton', { name: 'Seed', exact: true }).fill('-1');
   await page.getByRole('button', { name: 'Go', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('whole-number seed');
-  expect(await page.evaluate(() => window.__longTable!.world.seed)).toBe(42);
+  expect(await page.evaluate(() => window.__longTable!.world.seed)).toBe(43);
 });
 
 test('character explorer switches shared motion without changing its ground position', async ({ page }) => {
@@ -165,16 +167,94 @@ test('character explorer has one top bar and a minimal controls panel', async ({
   await expect(header.getByRole('button', { name: 'Zoom out', exact: true })).toBeFocused();
 });
 
+test('foraging explorer has one top bar and a focused controls panel', async ({ page }) => {
+  await openMode(page, 'foraging?paused=1');
+  const header = page.locator('.runtime-header');
+  const inspector = page.getByRole('complementary', { name: 'Inspector' });
+  const playback = inspector.getByRole('group', { name: 'Playback controls', exact: true });
+  const settings = inspector.locator('details');
+  await expect(page.locator('.runtime > .toolbar, .runtime-footer')).toHaveCount(0);
+  await expect(header.locator('.toolbar')).toHaveCount(1);
+  await expect(header.getByRole('heading')).toHaveText('Foraging Explorer');
+  await expect(header.getByRole('button')).toHaveCount(3);
+  await expect(inspector).toHaveCount(1);
+  await expect(inspector.getByRole('heading')).toHaveText(['Bush']);
+  await expect(inspector.locator('p, dl')).toHaveCount(0);
+  await expect(inspector.getByLabel('Berries', { exact: true })).toHaveText('Berries 0');
+  await expect(inspector.getByRole('group', { name: 'Set bush state' }).getByRole('button')).toHaveText(['Ripe', 'Depleted', 'Growing']);
+  await expect(inspector.getByTestId('bush-state')).toHaveText('ripe');
+  await expect(settings).not.toHaveAttribute('open');
+  await expect(page.getByRole('spinbutton', { name: 'Seed', exact: true })).toBeHidden();
+
+  for (const viewport of [{ width: 1280, height: 850 }, { width: 320, height: 780 }]) {
+    await page.setViewportSize(viewport);
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+    const geometry = await page.evaluate(() => {
+      const header = document.querySelector('.runtime-header')!.getBoundingClientRect();
+      const stage = document.querySelector('.stage')!.getBoundingClientRect();
+      return { headerBottom: header.bottom, stageTop: stage.top };
+    });
+    expect(geometry.stageTop).toBe(geometry.headerBottom);
+    await expect.poll(() => page.evaluate(() => {
+      const stage = document.querySelector('.stage')!.getBoundingClientRect();
+      const canvas = document.querySelector('canvas')!.getBoundingClientRect();
+      return Math.abs(stage.width - canvas.width);
+    })).toBeLessThanOrEqual(1);
+    for (const control of [
+      header.getByRole('link', { name: 'Home', exact: true }),
+      ...await header.getByRole('button').all(),
+      inspector.getByRole('combobox', { name: 'Bush', exact: true }),
+      ...await inspector.getByRole('button').filter({ visible: true }).all(),
+      settings.locator('summary'),
+    ]) {
+      await expect(control).toBeInViewport({ ratio: 1 });
+    }
+    expect(await inspector.evaluate((panel) => panel.scrollHeight <= panel.clientHeight)).toBe(true);
+  }
+  await page.getByRole('link', { name: 'Home', exact: true }).focus();
+  await page.keyboard.press('Tab');
+  await expect(header.getByRole('button', { name: 'Zoom out', exact: true })).toBeFocused();
+  await settings.locator('summary').focus();
+  await page.keyboard.press('Enter');
+  const seed = inspector.getByRole('spinbutton', { name: 'Seed', exact: true });
+  await seed.fill('-1');
+  await inspector.getByRole('button', { name: 'Go', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('whole-number seed');
+  expect(await page.evaluate(() => window.__longTable!.world.seed)).toBe(42);
+  await seed.fill('43');
+  await inspector.getByRole('button', { name: 'Go', exact: true }).click();
+  await expect(page.getByRole('alert')).toBeHidden();
+  expect(await page.evaluate(() => window.__longTable!.world.seed)).toBe(43);
+  await inspector.getByRole('button', { name: 'Generate a new island', exact: true }).click();
+  expect(await page.evaluate(() => window.__longTable!.world.seed)).toBe(Number(await seed.inputValue()));
+  await settings.locator('summary').click();
+  await playback.getByRole('button', { name: 'Resume', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__longTable!.simulation.elapsed)).toBeGreaterThan(0);
+  await playback.getByRole('button', { name: 'Pause', exact: true }).click();
+  const pausedTime = await page.evaluate(() => window.__longTable!.simulation.elapsed);
+  await page.waitForTimeout(250);
+  expect(await page.evaluate(() => window.__longTable!.simulation.elapsed)).toBe(pausedTime);
+  await playback.getByRole('button', { name: 'Reset this explorer', exact: true }).click();
+  expect(await page.evaluate(() => window.__longTable!.simulation.elapsed)).toBe(0);
+  await expect(inspector.getByTestId('bush-state')).toHaveText('ripe');
+});
+
 test('foraging explorer uses the real gathering and regrowth simulation', async ({ page }) => {
   await openMode(page, 'foraging');
   await page.getByRole('button', { name: 'Pause', exact: true }).click();
+  const playback = page.getByRole('group', { name: 'Playback controls', exact: true });
+  const playbackTop = await playback.evaluate((node) => node.getBoundingClientRect().top);
   await page.getByRole('button', { name: 'Gather selected bush', exact: true }).click();
   await expect.poll(() => page.evaluate(() => Boolean(window.__longTable!.simulation.job))).toBe(true);
+  expect(await playback.evaluate((node) => node.getBoundingClientRect().top)).toBe(playbackTop);
   await page.evaluate(() => {
     const simulation = window.__longTable!.simulation;
     for (let tick = 0; tick < 900; tick++) simulation.advance(1 / 60);
   });
   await expect(page.getByLabel('Berries', { exact: true })).toHaveText('Berries 3');
+  await page.getByRole('button', { name: 'Gather selected bush', exact: true }).click();
+  await expect(page.locator('.foraging-feedback')).toHaveText('Berries are regrowing');
+  await page.getByRole('combobox', { name: 'Bush', exact: true }).selectOption({ label: 'Bush 2' });
   await page.getByRole('button', { name: 'Depleted', exact: true }).click();
   await expect(page.getByTestId('bush-state')).toContainText('depleted');
   await page.evaluate(() => {
