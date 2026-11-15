@@ -2,6 +2,11 @@ import { readdir, readFile } from 'node:fs/promises';
 import { gzipSync } from 'node:zlib';
 
 const dist = new URL('../dist/', import.meta.url);
+const files = await readdir(dist, { recursive: true });
+const retired = files.filter(path => /^(?:world-family\/v1|versions\/island-v1|previews)(?:\/|$)/.test(path));
+if (retired.length) {
+  throw new Error(`Build contains retired standalone UI artifacts: ${retired.join(', ')}`);
+}
 const manifest = JSON.parse(await readFile(new URL('.vite/manifest.json', dist), 'utf8'));
 const entry = Object.values(manifest).find(chunk => chunk.isEntry);
 if (!entry) throw new Error('Build manifest has no application entry.');
@@ -23,8 +28,11 @@ const home = chunks.filter(chunk => chunk.initial);
 const budgets = [
   ['Home JavaScript', sum(home, 'raw'), 35_000],
   ['Home JavaScript (gzip)', sum(home, 'gzip'), 12_000],
-  ['All JavaScript', sum(chunks, 'raw'), 2_750_000],
-  ['All JavaScript (gzip)', sum(chunks, 'gzip'), 950_000],
+  // Includes a bounded 26 KB / 12 KB gzip allowance for the lazy bush-patch demo.
+  // Wall-path patch anchoring adds at most 1 KB raw / 512 bytes gzip; Home is unchanged.
+  // Rounded beach-mask filtering has a separate 2 KB raw / 1 KB gzip allowance.
+  ['All JavaScript', sum(chunks, 'raw'), 2_848_000 + 1_000 + 2_000],
+  ['All JavaScript (gzip)', sum(chunks, 'gzip'), 974_768 + 512 + 1_024],
 ];
 for (const [label, actual, limit] of budgets) {
   console.log(`${label}: ${actual} / ${limit} bytes`);

@@ -33,6 +33,7 @@ export interface World {
   cells: Uint8Array;
   provenance: 'captured-reference' | 'browser-generated' | 'test-fixture';
   elevations?: Uint8Array;
+  elevationHeights?: readonly number[];
   cliffCells?: Uint8Array;
   rampIds?: Int32Array;
   ramps?: Ramp[];

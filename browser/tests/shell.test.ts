@@ -1,20 +1,25 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { destinations, destinationById } from '../src/destinations';
 
-describe('destination registry', () => {
-  it('includes the game and every requested explorer exactly once', () => {
-    expect(destinations.map((destination) => destination.id)).toEqual([
-      'play', 'island', 'character', 'foraging', 'navigation',
-    ]);
-    expect(new Set(destinations.map((destination) => destination.id)).size).toBe(5);
-    expect(destinations.every((destination) => destination.title && destination.description && destination.detail)).toBe(true);
+describe('canonical shell', () => {
+  it('boots the integrated shell instead of a standalone runtime', () => {
+    const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+    expect(main).toContain("from './pilot/ui'");
+    expect(main).toContain("from './pilot/directory'");
+    expect(main).not.toContain('__longTable');
   });
 
-  it('keeps experimental terrain separate from approved gameplay', () => {
-    expect(destinationById('play')?.experimental).toBe(false);
-    expect(destinationById('island')?.experimental).toBe(true);
-    expect(destinationById('not-real')).toBeUndefined();
+  it('does not retain standalone UI source or deployable archived UI', () => {
+    for (const path of [
+      'src/character-creation.ts', 'src/character-customization.ts',
+      'src/debug.ts', 'src/destinations.ts',
+      'src/island-versions.ts', 'src/island-versions.css',
+      'src/landform-study.ts', 'src/landform-study.css', 'src/styles.css',
+      'public/world-family/v1', 'public/previews',
+      'tests/capture-previews.mjs', 'playwright.config.ts',
+    ]) {
+      expect(existsSync(new URL(`../${path}`, import.meta.url)), path).toBe(false);
+    }
   });
 });
 

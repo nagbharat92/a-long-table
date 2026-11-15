@@ -3,7 +3,7 @@
   "landformGenerator": "landform-contrast-v3",
   "source": "/Users/bharatnag/Documents/SideProjects/a-long-table-web/browser",
   "integratedRenderer": {
-    "description": "Working-tree source snapshot, not an assertion that it is byte-identical to the independently frozen deployment.",
+    "description": "Working-tree terrain and navigation source integrated into the shared explorer shell. Standalone UI and archived UI deployments were removed on October 28, 2026.",
     "unchangedDirectories": ["src/core", "src/fixtures"],
     "renderDirectory": "src/render copied unchanged except namespaced rabbit asset URLs in render/game-view.ts",
     "landformAdapter": "src/landform-study.ts: original generation, rendering, projections, probes, zoom, review storage and comparison logic; shell-facing DOM construction, lifecycle cleanup, namespaced assets and version URL adapted.",
@@ -19,10 +19,10 @@
       "render/landform-study.ts": "23719b6b3649acec04d2070a944965540c10c4b4ee00376555d45984e629ae4e"
     }
   },
-  "frozenV1": {
-    "source": "public/versions/island-v1",
-    "copy": "public/world-family/v1",
-    "description": "Unmodified complete deployed artifact, linked separately and explicitly from the integrated source renderer. No iframe or DOM-mutation adapter."
+  "wholeIsland": {
+    "generator": "core/island-landform.ts migrated from the retired worktree without algorithm changes.",
+    "renderer": "render/landform-study.ts includes full-island viewport, triangle and terrain-shading support from the retired worktree.",
+    "adapter": "island-landform.ts mounts full-island controls into the shared shell; no standalone runtime is retained."
   },
   "runtimeAssets": [
     "public/world-family/assets/rabbit.png",

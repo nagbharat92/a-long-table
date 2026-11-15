@@ -6,6 +6,7 @@ import { ActorDrawing, createBushTextures } from './actors';
 import { BLINK_TEXTURE, RABBIT_TEXTURE, SOURCE_PIXEL_SCALE } from './rabbit-texture';
 import { HOP_DISTANCE, RABBIT_MOTION_FRAME, sampleCharacterMotion, type RabbitMotionPose } from '../core/character-motion';
 import { dampedMotion } from '../core/motion-clock';
+import { clampIslandCenter, stepIslandZoom } from '../core/island-camera';
 import { OCEAN, TerrainDrawing } from './terrain';
 import { CharacterRigDrawing } from './character-rig';
 import { characterSetup, createCharacterRig, validateRigState, type CharacterRigState, type RigAudit, type RigNodeId } from '../core/character-rig';
@@ -28,7 +29,7 @@ export interface GameViewOptions {
 export interface GameView {
   setSimulation(simulation: GameSimulation): void;
   fit(): void;
-  zoomBy(multiplier: number): void;
+  zoomBy(multiplier: number, anchor?: Point): void;
   setInspection(enabled: boolean): void;
   setNavigationOverlay(enabled: boolean): void;
   setCharacterMode(mode: CharacterMode): void;
@@ -156,6 +157,12 @@ class ViewController implements GameView {
   private dpr = 1;
   private zoom = 1;
   private fitZoom = 1;
+  private islandCenter?: Point;
+  private islandTargetZoom = 1;
+  private islandZoomVelocity = 0;
+  private islandZoomAnchor?: { screen: Point; world: Point };
+  private spaceHeld = false;
+  private islandPan?: { pointerId: number; client: Point };
   private readonly cameraLayout = { x: NaN, y: NaN, zoom: NaN, width: NaN, height: NaN };
   private dprQuery?: MediaQueryList;
   private lastPointer?: Point;
@@ -189,6 +196,17 @@ class ViewController implements GameView {
     this.scene.game.canvas.addEventListener('webglcontextlost', this.onContextLost);
     this.scene.input.on(Phaser.Input.Events.POINTER_DOWN, this.onPointerDown);
     this.scene.input.on(Phaser.Input.Events.POINTER_MOVE, this.onPointerMove);
+    if (this.options.mode === 'island') {
+      const canvas = this.scene.game.canvas;
+      window.addEventListener('keydown', this.onPanKeyDown);
+      window.addEventListener('keyup', this.onPanKeyUp);
+      window.addEventListener('blur', this.resetIslandPan);
+      canvas.addEventListener('pointerdown', this.onPanDown, true);
+      canvas.addEventListener('pointermove', this.onPanMove, true);
+      canvas.addEventListener('pointerup', this.onPanEnd, true);
+      canvas.addEventListener('pointercancel', this.onPanEnd, true);
+      canvas.addEventListener('lostpointercapture', this.onPanEnd);
+    }
     this.watchDensity();
     this.resize();
     this.draw();
@@ -218,6 +236,7 @@ class ViewController implements GameView {
 
   private readonly onVisibility = () => this.guard(() => {
     this.hidden = document.hidden;
+    if (this.hidden) this.resetIslandPan();
     this.frameElapsed = 0;
     this.skipDelta = true;
     if (!this.hidden) this.resize();
@@ -242,6 +261,8 @@ class ViewController implements GameView {
   }
 
   private readonly onPointerDown = (pointer: Phaser.Input.Pointer) => this.guard(() => {
+    if (this.spaceHeld || this.islandPan) return;
+    if (this.options.mode === 'island') this.scene.game.canvas.focus({ preventScroll: true });
     const point = this.pointerPoint(pointer);
     const event = pointer.event;
     this.options.onGroundClick?.(point, {
@@ -251,8 +272,80 @@ class ViewController implements GameView {
   });
 
   private readonly onPointerMove = (pointer: Phaser.Input.Pointer) => this.guard(() => {
+    if (this.spaceHeld || this.islandPan) return;
     this.lastPointer = { x: pointer.x, y: pointer.y };
     this.options.onHover?.(this.pointerPoint(pointer));
+  });
+
+  private updatePanCursor(): void {
+    this.scene.game.canvas.style.cursor = this.islandPan ? 'grabbing' : this.spaceHeld ? 'grab' : '';
+  }
+
+  private endIslandPan(): void {
+    const pan = this.islandPan;
+    this.islandPan = undefined;
+    const canvas = this.scene.game.canvas;
+    if (pan && canvas.hasPointerCapture(pan.pointerId)) canvas.releasePointerCapture(pan.pointerId);
+    this.updatePanCursor();
+  }
+
+  private readonly resetIslandPan = () => {
+    this.spaceHeld = false;
+    this.endIslandPan();
+  };
+
+  private readonly onPanKeyDown = (event: KeyboardEvent) => this.guard(() => {
+    if (event.code !== 'Space' || event.ctrlKey || event.metaKey || event.altKey
+      || (event.target instanceof Element && event.target.closest('input, select, textarea, button, summary, a, [contenteditable]:not([contenteditable="false"])'))) return;
+    event.preventDefault();
+    this.spaceHeld = true;
+    this.lastPointer = undefined;
+    this.options.onHover?.(null);
+    this.updatePanCursor();
+  });
+
+  private readonly onPanKeyUp = (event: KeyboardEvent) => this.guard(() => {
+    if (event.code !== 'Space' || !this.spaceHeld) return;
+    event.preventDefault();
+    this.resetIslandPan();
+  });
+
+  private readonly onPanDown = (event: PointerEvent) => this.guard(() => {
+    if (!this.spaceHeld || event.button !== 0 || !event.isPrimary) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const canvas = this.scene.game.canvas;
+    canvas.focus({ preventScroll: true });
+    this.islandTargetZoom = this.zoom;
+    this.islandZoomVelocity = 0;
+    this.islandZoomAnchor = undefined;
+    this.islandCenter = this.screenToWorld({ x: this.cssWidth / 2, y: this.cssHeight / 2 });
+    this.islandPan = { pointerId: event.pointerId, client: { x: event.clientX, y: event.clientY } };
+    canvas.setPointerCapture(event.pointerId);
+    this.updatePanCursor();
+  });
+
+  private readonly onPanMove = (event: PointerEvent) => this.guard(() => {
+    const pan = this.islandPan;
+    const center = this.islandCenter;
+    if (!pan || !center || event.pointerId !== pan.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!(event.buttons & 1)) {
+      this.endIslandPan();
+      return;
+    }
+    const bounds = this.scene.game.canvas.getBoundingClientRect();
+    this.islandCenter = {
+      x: center.x - (event.clientX - pan.client.x) * this.camera.width / bounds.width / this.zoom,
+      y: center.y - (event.clientY - pan.client.y) * this.camera.height / bounds.height / this.zoom,
+    };
+    pan.client = { x: event.clientX, y: event.clientY };
+    this.draw();
+  });
+
+  private readonly onPanEnd = (event: PointerEvent) => this.guard(() => {
+    if (event.pointerId === this.islandPan?.pointerId) this.endIslandPan();
   });
 
   private resize(contentWidth?: number, contentHeight?: number): void {
@@ -273,6 +366,7 @@ class ViewController implements GameView {
     this.mountVisible = true;
     if (width === this.cssWidth && height === this.cssHeight && nextDpr === this.dpr) return;
     const oldDpr = this.dpr;
+    this.endIslandPan();
     this.cssWidth = width;
     this.cssHeight = height;
     this.dpr = nextDpr;
@@ -287,7 +381,11 @@ class ViewController implements GameView {
     canvas.style.height = `${height}px`;
     this.scene.scale.refresh();
     this.camera.setSize(backingWidth, backingHeight);
-    this.zoom = snapDown(this.zoom / oldDpr * nextDpr);
+    this.zoom = this.options.mode === 'island'
+      ? this.zoom / oldDpr * nextDpr
+      : snapDown(this.zoom / oldDpr * nextDpr);
+    this.islandTargetZoom = this.islandTargetZoom / oldDpr * nextDpr;
+    this.islandZoomAnchor = undefined;
     this.layoutCamera();
     this.skipDelta = true;
   }
@@ -317,11 +415,17 @@ class ViewController implements GameView {
         Math.max(1, this.camera.width - margin * 2) / this.bounds.width,
         Math.max(1, this.camera.height - margin * 2) / this.bounds.height,
       );
-      this.fitZoom = snapDown(fit);
-      this.zoom = this.following
-        ? Phaser.Math.Clamp(this.zoom, this.fitZoom, Math.max(this.fitZoom, Math.floor(32 * this.dpr)))
-        : this.fitZoom;
-      this.following = this.zoom > this.fitZoom;
+      this.fitZoom = this.options.mode === 'island' ? fit : snapDown(fit);
+      if (this.options.mode === 'island') {
+        const max = Math.max(this.fitZoom, 32 * this.dpr);
+        this.zoom = this.islandCenter ? Phaser.Math.Clamp(this.zoom, this.fitZoom, max) : this.fitZoom;
+        this.islandTargetZoom = this.islandCenter ? Phaser.Math.Clamp(this.islandTargetZoom, this.fitZoom, max) : this.zoom;
+      } else {
+        this.zoom = this.following
+          ? Phaser.Math.Clamp(this.zoom, this.fitZoom, Math.max(this.fitZoom, Math.floor(32 * this.dpr)))
+          : this.fitZoom;
+        this.following = this.zoom > this.fitZoom;
+      }
     }
     this.camera.setZoom(this.zoom);
     this.positionCamera();
@@ -334,6 +438,10 @@ class ViewController implements GameView {
       const foot = this.simulation.character.position;
       x = foot.x;
       y = foot.y + (this.rigState ? -14.5 : RABBIT_MOTION_FRAME.y + RABBIT_MOTION_FRAME.height / 2 - 29) * SOURCE_PIXEL_SCALE;
+    } else if (this.options.mode === 'island' && this.islandCenter) {
+      this.islandCenter = clampIslandCenter(this.islandCenter, this.bounds, this.camera, this.zoom, this.fitZoom);
+      x = this.islandCenter.x;
+      y = this.islandCenter.y;
     } else if (this.following) {
       x = this.simulation.character.position.x;
       y = this.simulation.character.position.y;
@@ -359,6 +467,9 @@ class ViewController implements GameView {
       if (this.dpr !== density()) this.resize();
       const skip = this.skipDelta;
       this.skipDelta = false;
+      if (!this.hidden && this.mountVisible && !skip) {
+        this.advanceIslandZoom(Math.min(Math.max(0, deltaMilliseconds / 1000), MAX_FRAME_SECONDS));
+      }
       if (!this.paused && !this.rigState && !this.hidden && this.mountVisible && !skip) {
         const delta = Math.min(Math.max(0, deltaMilliseconds / 1000), MAX_FRAME_SECONDS);
         if (this.options.mode === 'character') {
@@ -389,6 +500,22 @@ class ViewController implements GameView {
     else this.actors.render(this.simulation.character, this.simulation.bushes, this.zoom / this.dpr, this.getCharacterMotion() ?? undefined);
   }
 
+  private advanceIslandZoom(delta: number): void {
+    if (this.options.mode !== 'island' || (this.zoom === this.islandTargetZoom && this.islandZoomVelocity === 0)) return;
+    const next = stepIslandZoom(this.zoom, this.islandTargetZoom, this.islandZoomVelocity, delta,
+      this.fitZoom, Math.max(this.fitZoom, 32 * this.dpr));
+    this.zoom = next.zoom;
+    this.islandZoomVelocity = next.velocity;
+    const anchor = this.islandZoomAnchor;
+    if (anchor) {
+      this.islandCenter = {
+        x: anchor.world.x - (anchor.screen.x - this.cssWidth / 2) * this.camera.width / this.cssWidth / this.zoom,
+        y: anchor.world.y - (anchor.screen.y - this.cssHeight / 2) * this.camera.height / this.cssHeight / this.zoom,
+      };
+    }
+    this.camera.setZoom(this.zoom);
+  }
+
   setSimulation(simulation: GameSimulation): void {
     this.assertAlive();
     this.simulation = simulation;
@@ -410,16 +537,30 @@ class ViewController implements GameView {
   fit(): void {
     this.assertAlive();
     this.following = false;
+    this.endIslandPan();
+    this.islandZoomVelocity = 0;
+    this.islandCenter = undefined;
+    this.islandZoomAnchor = undefined;
     if (this.rigState) this.rigMagnification = undefined;
     else this.characterMagnification = undefined;
     this.layoutCamera();
     this.draw();
   }
 
-  zoomBy(multiplier: number): void {
+  zoomBy(multiplier: number, anchor?: Point): void {
     this.assertAlive();
     if (!Number.isFinite(multiplier) || multiplier <= 0) throw new RangeError('Zoom multiplier must be finite and positive.');
+    if (anchor) finitePoint(anchor);
     if (multiplier === 1) return;
+    if (this.options.mode === 'island') {
+      if (this.islandPan) return;
+      const target = Phaser.Math.Clamp(this.islandTargetZoom * multiplier, this.fitZoom, Math.max(this.fitZoom, 32 * this.dpr));
+      if (target === this.islandTargetZoom) return;
+      const screen = anchor ?? { x: this.cssWidth / 2, y: this.cssHeight / 2 };
+      this.islandZoomAnchor = { screen: { ...screen }, world: this.screenToWorld(screen) };
+      this.islandTargetZoom = target;
+      return;
+    }
     if (this.options.mode === 'character') {
       const current = this.zoom * SOURCE_PIXEL_SCALE;
       const target = multiplier > 1 ? Math.ceil(current * multiplier) : Math.floor(current * multiplier);
@@ -729,6 +870,7 @@ class ViewController implements GameView {
 
   destroy(): void {
     if (this.destroyed) return;
+    this.resetIslandPan();
     this.destroyed = true;
     this.observer.disconnect();
     this.dprQuery?.removeEventListener('change', this.onDensity);
@@ -739,6 +881,15 @@ class ViewController implements GameView {
     this.scene.game.canvas.removeEventListener('webglcontextlost', this.onContextLost);
     this.scene.input.off(Phaser.Input.Events.POINTER_DOWN, this.onPointerDown);
     this.scene.input.off(Phaser.Input.Events.POINTER_MOVE, this.onPointerMove);
+    window.removeEventListener('keydown', this.onPanKeyDown);
+    window.removeEventListener('keyup', this.onPanKeyUp);
+    window.removeEventListener('blur', this.resetIslandPan);
+    const canvas = this.scene.game.canvas;
+    canvas.removeEventListener('pointerdown', this.onPanDown, true);
+    canvas.removeEventListener('pointermove', this.onPanMove, true);
+    canvas.removeEventListener('pointerup', this.onPanEnd, true);
+    canvas.removeEventListener('pointercancel', this.onPanEnd, true);
+    canvas.removeEventListener('lostpointercapture', this.onPanEnd);
     this.actors.destroy();
     this.rig?.destroy();
     this.terrain?.destroy();
@@ -753,6 +904,7 @@ export async function createGameView(container: HTMLElement, options: GameViewOp
   canvas.style.imageRendering = 'pixelated';
   canvas.style.touchAction = 'none';
   canvas.setAttribute('aria-label', options.mode === 'character' ? 'Animated pixel-art rabbit' : 'Interactive island');
+  if (options.mode === 'island') canvas.tabIndex = 0;
   const context = canvas.getContext('webgl', { antialias: false, alpha: false, premultipliedAlpha: true });
   if (!context) {
     const error = new Error('WebGL is required for this view. No alternate rendering backend was started.');

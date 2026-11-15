@@ -9,6 +9,18 @@
 .foliage-family .asset-preview-row { display: flex; align-items: flex-end; justify-content: center; gap: 24px; max-width: 100%; }
 .foliage-family .asset-preview-row figure { display: grid; justify-items: center; gap: 12px; margin: 0; min-width: 0; }
 .foliage-family .asset-preview-row canvas { max-width: 100%; object-fit: contain; }
+.foliage-family .customization-parameters .tree-shadow-toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.foliage-family .customization-parameters .tree-shadow-toggle input {
+  flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--game-active);
+}
+.foliage-family .tree-sun-controls { display: grid; gap: 16px; margin-top: 16px; }
+.foliage-family .customization-parameters .tree-sun-slider { display: grid; gap: 8px; }
+.foliage-family .tree-sun-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.foliage-family .customization-parameters .tree-sun-heading output { display: inline; margin: 0; color: var(--game-paper); }
+.foliage-family .tree-sun-select select {
+  min-height: 38px; padding: 8px; border: 1px solid var(--game-edge);
+  border-radius: 3px; background: var(--game-ink); color: var(--game-paper);
+}
 .foliage-family figcaption { font-size: 12px; text-align: center; }
 .foliage-family .customization-footer { display: grid; gap: 8px; }
 .foliage-family button, .foliage-family .forage-tabs a {

@@ -33,13 +33,13 @@ export async function mountWorldFamily(shell: PilotShell, params: URLSearchParam
   }
   shell.root.classList.add('p-world-family');
   try {
-    const rawVersion = params.get('version') ?? (params.get('study') === 'landform' ? 'v2' : 'v1');
+    const rawVersion = params.get('version') ?? 'v2';
     if (mode === 'island' && rawVersion !== 'v1' && rawVersion !== 'v2') throw new Error('Unknown island version. Choose version=v1 or version=v2.');
     let provenance: HTMLElement | undefined;
     shell.subject.append(el('h1', '', mode === 'island' ? 'Island Explorer' : 'Navigation Explorer'));
     if (mode === 'island') {
       shell.root.dataset.worldVersion = rawVersion;
-      shell.subject.append(el('p', 'p-muted', rawVersion === 'v2' ? 'V2 · Landform rebuild · In review' : 'V1 · Original terrain · Source snapshot'));
+      shell.subject.append(el('p', 'p-muted', rawVersion === 'v2' ? 'V2 · Procedural coasts · In review' : 'V1 · Original terrain · Source snapshot'));
       const versionLabel = el('label', 'p-world-version', 'Island version');
       const version = el('select');
       version.setAttribute('aria-label', 'Island version');
@@ -63,19 +63,19 @@ export async function mountWorldFamily(shell: PilotShell, params: URLSearchParam
       shell.toolsContent.append(islandJournal());
       provenance = section('Source provenance');
       provenance.append(el('p', 'p-muted', rawVersion === 'v2'
-        ? 'Current landform-study source, copied into this pilot. Authored reference and seeded studies are not playable terrain. Surface materials and elevation transitions remain planned.'
-        : 'Integrated original terrain algorithms from the October 28 upstream source snapshot. The independently frozen V1 deployment remains available unchanged for archival comparison.'));
-      const archive = el('a', 'p-button', 'Open frozen V1 artifact ↗');
-      archive.href = `${import.meta.env.BASE_URL}world-family/v1/index.html#/island?seed=${params.get('seed') ?? '42'}&paused=1`;
-      archive.target = '_blank';
-      archive.rel = 'noopener';
-      provenance.append(archive);
+        ? 'Connected landform studies and whole-island geometry use the shared explorer shell. These shape previews are not playable terrain.'
+        : 'Original terrain algorithms from the October 28 source snapshot, integrated into the shared explorer shell.'));
     } else {
       shell.subject.append(el('p', 'p-muted', 'Terrain costs, clearance and routes'));
     }
     if (mode === 'island' && rawVersion === 'v2') {
-      const { mountLandformStudy } = await import('../world-family/landform-study');
-      if (!signal.aborted) mounted = await mountLandformStudy(shell, params, signal);
+      if (params.get('source') !== 'reference') {
+        const { mountIslandLandform } = await import('../world-family/island-landform');
+        if (!signal.aborted) mounted = await mountIslandLandform(shell, params, signal);
+      } else {
+        const { mountLandformStudy } = await import('../world-family/landform-study');
+        if (!signal.aborted) mounted = await mountLandformStudy(shell, params, signal);
+      }
     } else if (!signal.aborted) {
       mounted = await mountTerrain(shell, params, mode, signal);
     }
@@ -324,6 +324,7 @@ async function mountTerrain(shell: PilotShell, params: URLSearchParams, mode: Wo
   const playback = el('div', 'p-choices');
   playback.append(pause, button('Reset', () => regenerate(seed)));
   display.append(overlayRow, zoomRow, playback, status);
+  if (mode === 'island') display.append(el('p', 'p-muted', 'Scroll to zoom at the pointer. Hold Space and drag to pan. + / - zoom at the view center. Fit or F frames the island.'));
   shell.sessionControls.append(display);
   const session = section('This session');
   session.append(sessionReadout, el('p', 'p-muted', 'Reset starts this fixture again. Explorers do not change the game or one another.'));
@@ -349,7 +350,18 @@ async function mountTerrain(shell: PilotShell, params: URLSearchParams, mode: Wo
   signal.addEventListener('abort', destroy, { once: true });
   shell.stage.addEventListener('wheel', event => {
     event.preventDefault();
-    if (event.deltaY !== 0) guarded(() => view?.zoomBy(event.deltaY < 0 ? 1.5 : 1 / 1.5));
+    if (event.deltaY === 0) return;
+    guarded(() => {
+      if (mode !== 'island') {
+        view?.zoomBy(event.deltaY < 0 ? 1.5 : 1 / 1.5);
+        return;
+      }
+      const bounds = shell.stage.getBoundingClientRect();
+      const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? bounds.height : 1;
+      const zoomStep = Math.max(-1.2, Math.min(1.2, event.deltaY * unit * 0.006));
+      view?.zoomBy(Math.exp(-zoomStep), { x: event.clientX - bounds.left, y: event.clientY - bounds.top });
+    });
   }, { signal, passive: false });
   window.addEventListener('keydown', event => {
     if (event.ctrlKey || event.metaKey || event.altKey
@@ -400,6 +412,7 @@ async function mountTerrain(shell: PilotShell, params: URLSearchParams, mode: Wo
       paused, inspection, navigationOverlay, brush, world,
       character: { ...simulation.character, position: { ...simulation.character.position }, route: simulation.character.route.map(point => ({ ...point })) },
       elapsed: simulation.elapsed, feedback: simulation.feedback,
+      camera: view?.getCameraState(),
     }),
   };
 }

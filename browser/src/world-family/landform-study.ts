@@ -8,6 +8,8 @@ import {
   drawLandform, studyScreenPoint, STUDY_WIDTH, STUDY_HEIGHT,
   type LandPalette, type RabbitPixels,
 } from './render/landform-study';
+import { diagnosticSetting } from './render/landform-diagnostics';
+import { waterParameters, waterSettingsFromParameters } from './render/island-water-settings';
 
 type StudyProjection = 'current' | 'oblique' | 'compare';
 type StudyView = 'blockout' | 'plan' | 'closeup';
@@ -40,12 +42,21 @@ function choice<T extends string>(value: string | null, allowed: readonly T[], f
 }
 
 export async function mountLandformStudy(shell: PilotShell, parameters: URLSearchParams, signal: AbortSignal): Promise<PilotController> {
+  const waterSettings = waterSettingsFromParameters(parameters);
   let projection = choice<StudyProjection>(parameters.get('projection'), ['current', 'oblique', 'compare'], 'oblique');
   let view = choice<StudyView>(parameters.get('view'), ['blockout', 'plan', 'closeup'], 'blockout');
   let scale = choice(parameters.get('scale'), ['0', '1'], '0') === '1';
   let probe = choice(parameters.get('probe'), ['0', '1'], '0') === '1';
   let source = choice<StudySource>(parameters.get('source'), ['reference', 'generated', 'sheet'], 'reference');
   let contours = choice(parameters.get('contours'), ['0', '1'], '0') === '1';
+  const diagnostics = {
+    checker: diagnosticSetting(parameters, 'checker'),
+    wireframe: diagnosticSetting(parameters, 'wireframe'),
+  };
+  const regions = diagnosticSetting(parameters, 'regions');
+  const groundMask = diagnosticSetting(parameters, 'groundMask');
+  choice(parameters.get('edges'), ['conditioned', 'grid'], 'grid');
+  const edges = 'grid';
   const initialSeed = parameters.get('landSeed') ?? '0';
   if (!/^\d{1,6}$/.test(initialSeed)) throw new Error('Landform seed must be a whole number from 0 to 999999.');
   let landSeed = Number(initialSeed);
@@ -77,6 +88,8 @@ export async function mountLandformStudy(shell: PilotShell, parameters: URLSearc
   const help = node('p', { class: 'landform-help' }, 'New outlines and elevation layouts per seed. Three elevations; no texture, routes or movement.');
   stage.append(gallery);
   shell.sessionControls.append(toolbar);
+  const wholeIsland = node('a', { class: 'p-button', href: `#/island?version=v2&study=landform&source=island&seed=${baseline ?? '902479'}&${waterParameters(waterSettings)}` }, 'Whole island');
+  shell.sessionControls.append(wholeIsland);
   document.title = 'Landform study · Island Explorer';
 
   function fail(cause: unknown): void {
@@ -214,6 +227,18 @@ export async function mountLandformStudy(shell: PilotShell, parameters: URLSearc
     update();
   });
   const notes = node('section', { class: 'landform-notes' });
+  const surfaceControls = group('Surface diagnostics');
+  for (const [key, label] of [['checker', 'Projection checker'], ['wireframe', 'Triangle wireframe']] as const) {
+    const wrapper = node('label', { class: 'landform-checkbox' });
+    const input = node('input', { type: 'checkbox' });
+    input.checked = diagnostics[key];
+    listen(input, 'change', () => {
+      try { diagnostics[key] = input.checked; update(); } catch (cause) { fail(cause); }
+    });
+    wrapper.append(input, document.createTextNode(label));
+    surfaceControls.append(wrapper);
+  }
+  surfaceControls.append(node('p', { class: 'landform-help' }, 'Unlit 8-unit squares: XY on tops, YZ / XZ on cliffs, normal-weighted on slopes. Wireframe shows visible triangle edges, including diagonals.'));
   const dimensionNote = node('p');
   inspector.append(reviewControls.parentElement!);
   notes.append(
@@ -282,7 +307,7 @@ export async function mountLandformStudy(shell: PilotShell, parameters: URLSearc
     const canvas = node('canvas', {
       role: 'img', 'aria-label': `${title}: connected low ground, middle shelf and high shoulder${scale ? ', with static rabbit scale references' : ''}`,
     });
-    drawLandform(canvas, kind, colors, scale ? rabbit : undefined, probe, shape.masses, shape.placements, shape.probe);
+    drawLandform(canvas, kind, colors, scale ? rabbit : undefined, probe, shape.masses, shape.placements, shape.probe, { diagnostics });
     canvas.dataset.landSeed = seed === undefined ? 'reference' : String(seed);
     if (kind === 'plan') planOverlay(canvas, shape);
     if (view === 'closeup' && source !== 'sheet') {
@@ -414,6 +439,13 @@ export async function mountLandformStudy(shell: PilotShell, parameters: URLSearc
     if (probe) next.set('probe', '1');
     if (magnification) next.set('zoom', String(magnification));
     next.set('version', 'v2');
+    next.set('checker', String(Number(diagnostics.checker)));
+    next.set('wireframe', String(Number(diagnostics.wireframe)));
+    next.set('regions', String(Number(regions)));
+    next.set('groundMask', String(Number(groundMask)));
+    next.set('edges', edges);
+    waterParameters(waterSettings).forEach((value, key) => next.set(key, value));
+    wholeIsland.href = `#/island?version=v2&study=landform&source=island&seed=${baseline ?? '902479'}&checker=${Number(diagnostics.checker)}&wireframe=${Number(diagnostics.wireframe)}&regions=${Number(regions)}&groundMask=${Number(groundMask)}&edges=${edges}&${waterParameters(waterSettings)}`;
     history.replaceState(null, '', `#/island?${next}`);
     layout();
   }
@@ -463,7 +495,7 @@ export async function mountLandformStudy(shell: PilotShell, parameters: URLSearc
   return {
     destroy,
     snapshot() {
-      return { mode: 'island', version: 'v2', source, projection, view, landSeed, contours, scale, probe, magnification };
+      return { mode: 'island', version: 'v2', source, projection, view, landSeed, contours, scale, probe, magnification, ...diagnostics };
     },
   };
 }

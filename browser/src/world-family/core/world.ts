@@ -12,7 +12,8 @@ export const BEACH_LEVEL = 0.12;
 export const SHALLOW_LEVEL = -0.20;
 export const CLIFF_DEPTH = 5;
 export const GENERATOR_VERSION = 'browser-opensimplex2s-mulberry32-coast-v1';
-export const ISLAND_GENERATOR_VERSION = 'browser-seeded-highlands-v3';
+export const ISLAND_GENERATOR_VERSION = 'browser-seeded-highlands-v4';
+const ISLAND_RELIEF_VARIATIONS = 48;
 const BORDER = 6;
 const SIZE = WIDTH * HEIGHT;
 const CARDINAL: readonly Point[] = [
@@ -45,14 +46,14 @@ export function generateWorld(seed: number, options: { relief?: boolean } = {}):
 export function generateIslandWorld(seed: number): World {
   const world = generateWorld(seed);
   const shore = coastDistance(world.cells);
-  for (let variation = 0; variation < 24; variation++) {
+  for (let variation = 0; variation < ISLAND_RELIEF_VARIATIONS; variation++) {
     const levels = islandReliefLevels(world, shore, variation);
     if (!connectRelief(world, levels, variation, true)) continue;
     world.generatorVersion = `${ISLAND_GENERATOR_VERSION}${BASELINES.has(seed) ? '-reference-coast' : ''}`;
     world.provenance = 'browser-generated';
     return world;
   }
-  throw new Error(`Seeded highlands could not connect island elevations for seed ${seed} after 24 variations.`);
+  throw new Error(`Seeded highlands could not connect island elevations for seed ${seed} after ${ISLAND_RELIEF_VARIATIONS} variations.`);
 }
 
 export function inBounds(world: World, cell: Point): boolean {
@@ -361,13 +362,14 @@ function reliefLevels(world: World, shore: Int32Array, variation: number): Uint8
 }
 
 function islandReliefLevels(world: World, shore: Int32Array, variation: number): Uint8Array {
-  // Large-scale choices stay fixed across connectivity retries; only edge detail changes.
+  // Preserve existing layouts first, then retry mass placement without changing elevation coverage.
   const rng = seededRandom(world.seed ^ 0x714a3f29);
   const extent = rng();
   const coverage = extent < 0.12 ? 0 : lerp(0.10, 0.62, (extent - 0.12) / 0.88);
   if (!coverage) return new Uint8Array(SIZE);
   const summit = rng();
   const highShare = summit < 0.30 ? 0 : lerp(0.15, 0.50, (summit - 0.30) / 0.70);
+  const massRandom = variation < 24 ? rng : seededRandom(world.seed ^ 0x714a3f29 ^ (variation * 104729));
   const eligible: number[] = [];
   for (let i = 0; i < SIZE; i++) {
     if (world.heights[i] > BEACH_LEVEL && shore[i] >= 5) eligible.push(i);
@@ -376,15 +378,15 @@ function islandReliefLevels(world: World, shore: Int32Array, variation: number):
   const xs = eligible.map(i => i % WIDTH), ys = eligible.map(i => Math.floor(i / WIDTH));
   const spanX = Math.max(...xs) - Math.min(...xs) + 1;
   const spanY = Math.max(...ys) - Math.min(...ys) + 1;
-  const masses = Array.from({ length: 1 + Math.floor(rng() * 3) }, () => {
-    const anchor = eligible[Math.floor(rng() * eligible.length)];
-    const angle = rng() * Math.PI * 2;
+  const masses = Array.from({ length: 1 + Math.floor(massRandom() * 3) }, () => {
+    const anchor = eligible[Math.floor(massRandom() * eligible.length)];
+    const angle = massRandom() * Math.PI * 2;
     return {
       x: anchor % WIDTH, y: Math.floor(anchor / WIDTH),
       cosine: Math.cos(angle), sine: Math.sin(angle),
-      major: Math.max(spanX, spanY) * lerp(0.22, 0.65, rng()),
-      minor: Math.min(spanX, spanY) * lerp(0.16, 0.40, rng()),
-      height: lerp(0.85, 1.15, rng()),
+      major: Math.max(spanX, spanY) * lerp(0.22, 0.65, massRandom()),
+      minor: Math.min(spanX, spanY) * lerp(0.16, 0.40, massRandom()),
+      height: lerp(0.85, 1.15, massRandom()),
     };
   });
   const seed = (world.seed ^ (variation * 104729) ^ 0x25b7e1) & 0x7fffffff;
@@ -422,6 +424,16 @@ function addRelief(world: World): void {
   throw new Error(`Relief generation could not connect island elevations for seed ${world.seed} after 12 variations.`);
 }
 
+export { coastDistance as islandCoastDistance, cleanMask as cleanIslandMask };
+
+export function connectIslandElevations(world: World, levels: Uint8Array, variation: number): boolean {
+  if (world.width !== WIDTH || world.height !== HEIGHT || levels.length !== SIZE
+    || levels.some(level => level > 6) || !Number.isInteger(variation) || variation < 0) {
+    throw new Error('Island connectivity requires a generated world, valid terrace levels and a non-negative variation.');
+  }
+  return connectRelief(world, levels, variation, true);
+}
+
 function connectRelief(world: World, levels: Uint8Array, variation: number, pathways = false): boolean {
   const walls = new Uint8Array(SIZE);
   for (let i = 0; i < SIZE - WIDTH; i++) {
@@ -436,7 +448,8 @@ function connectRelief(world: World, levels: Uint8Array, variation: number, path
   const ids = new Int32Array(SIZE).fill(-1);
   areas.forEach((area, id) => { for (const i of area) ids[i] = id; });
   const candidates = rampCandidates(world, levels, pathways, walls);
-  const clearance = pathways ? [0, 1, 2].map(level =>
+  const levelCount = Math.max(3, levels.reduce((max, level) => Math.max(max, level + 1), 0));
+  const clearance = pathways ? Array.from({ length: levelCount }, (_, level) =>
     coastDistance(Uint8Array.from(world.cells, (land, i) => Number(land && !walls[i] && levels[i] === level)))) : [];
   const rng = seededRandom(world.seed ^ (variation * 7919) ^ 0x137a49);
   const approachClearance = (ramp: Ramp) => Math.min(

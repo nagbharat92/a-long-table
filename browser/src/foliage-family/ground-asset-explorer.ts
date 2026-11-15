@@ -1,5 +1,6 @@
 import { foliageTabs, type StaticGroundAssetTab } from './foliage-tabs';
 import { presentExplorer, registerSnapshot, reportError } from './pilot-host';
+import { DEFAULT_SUN, sunParameters, sunSettingsFromParameters, validateSunSettings, type SunSettings } from '../world-family/render/island-sun';
 
 export interface GroundAssetAppearance {
   version: 1;
@@ -38,6 +39,11 @@ export interface GroundAssetStudy<Appearance extends GroundAssetAppearance = Gro
     dimensions: { readonly width: number; readonly height: number };
     draw: (context: CanvasRenderingContext2D, appearance: Appearance) => void;
   };
+  shadowStudy?: {
+    height: number;
+    groundStart: number;
+    draw: (single: CanvasRenderingContext2D, layered: CanvasRenderingContext2D, appearance: Appearance, seconds: number, wind: GroundAssetWind, groundColor: string, sun: SunSettings) => void;
+  };
   motion?: {
     modes: readonly string[];
     presets: readonly string[];
@@ -73,6 +79,7 @@ export function mountGroundAssetExplorer<Appearance extends GroundAssetAppearanc
     width: String(dimensions.width), height: String(dimensions.height), role: 'img',
   });
   const canvas = makeCanvas();
+  if (study.shadowStudy) canvas.height = study.shadowStudy.height;
   canvas.className = `forage-bush ${name.toLowerCase()}-preview`;
   const caption = node('output', '', { class: 'forage-caption', 'aria-label': `${name} appearance` });
   const comparison = node('div', '', { class: 'grass-study', 'aria-label': `${name} ${study.motion ? 'motion' : 'silhouette'} comparison` });
@@ -94,6 +101,7 @@ export function mountGroundAssetExplorer<Appearance extends GroundAssetAppearanc
       width: String(study.companion.dimensions.width), height: String(study.companion.dimensions.height),
       role: 'img', 'aria-label': study.companion.label, class: 'asset-companion',
     });
+    if (study.shadowStudy) companionCanvas.height = study.shadowStudy.height;
     layered.append(companionCanvas, node('figcaption', study.companion.label));
     row.append(single, layered);
     stage.append(row, caption, comparison);
@@ -123,11 +131,14 @@ export function mountGroundAssetExplorer<Appearance extends GroundAssetAppearanc
     const companionContext = companionCanvas?.getContext('2d');
     if (companionCanvas && !companionContext) throw new Error('Could not open the layered preview canvas.');
     let seconds = 0;
+    let shadows = Boolean(study.shadowStudy);
+    let sunSettings = study.shadowStudy ? sunSettingsFromParameters(parameters) : null;
     let paused = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const wind: GroundAssetWind = { ...(study.motion?.defaults ?? { mode: 0, preset: 0, strength: 0, speed: 1, direction: 1 }) };
     registerSnapshot(root, () => ({
       appearance: { ...appearance }, wind: study.motion ? { ...wind } : null,
-      seconds, paused, name, dimensions: { ...dimensions },
+      seconds, paused, shadows: study.shadowStudy ? shadows : null,
+      sun: sunSettings ? { ...sunSettings } : null, name, dimensions: { ...dimensions },
     }));
     let frame = 0;
     let previous: number | undefined;
@@ -158,6 +169,9 @@ export function mountGroundAssetExplorer<Appearance extends GroundAssetAppearanc
     };
     let pause: HTMLButtonElement | undefined;
     let motionTime: HTMLOutputElement | undefined;
+    let resetSun: HTMLButtonElement | undefined;
+    const sunInputs = new Map<keyof SunSettings, HTMLInputElement | HTMLSelectElement>();
+    const sunReadouts = new Map<keyof SunSettings, HTMLOutputElement>();
     const motionInputs: { input: HTMLInputElement; output: HTMLOutputElement; key: 'strength' | 'speed' }[] = [];
     if (study.motion) {
       options('Motion', study.motion.modes, () => wind.mode, index => { wind.mode = index; });
@@ -175,6 +189,78 @@ export function mountGroundAssetExplorer<Appearance extends GroundAssetAppearanc
         input.addEventListener('input', () => {
           try { wind[key] = Number(input.value); render(); error.hidden = true; } catch (cause) { showError(cause); }
         }, { signal });
+      }
+      if (study.shadowStudy) {
+        const lighting = section('Sun and shadows');
+        const label = node('label', 'Cast on ground and trees', { class: 'tree-shadow-toggle' });
+        const toggle = node('input', '', { type: 'checkbox' });
+        toggle.checked = shadows;
+        toggle.addEventListener('change', () => {
+          try { shadows = toggle.checked; render(); error.hidden = true; } catch (cause) { showError(cause); }
+        }, { signal });
+        label.prepend(toggle);
+        lighting.append(label);
+        const controls = node('div', '', { class: 'tree-sun-controls' });
+        const changeSun = (next: SunSettings): void => {
+          try {
+            sunSettings = validateSunSettings(next);
+            writeUrl();
+            render();
+            error.hidden = true;
+          } catch (cause) { showError(cause); }
+        };
+        for (const [key, title, min, max, step] of [
+          ['azimuth', 'Sun direction', 0, 360, 1],
+          ['elevation', 'Sun elevation', 10, 85, 1],
+          ['intensity', 'Sun intensity', 0, 2, 0.05],
+          ['skyFill', 'Sky fill', 0, 1, 0.05],
+          ['warmth', 'Sun warmth', 0, 1, 0.05],
+          ['shadowStrength', 'Shadow strength', 0, 1, 0.05],
+          ['softness', 'Shadow softness', 0, 8, 0.1],
+        ] as const) {
+          const row = node('label', '', { class: 'tree-sun-slider' });
+          const heading = node('span', '', { class: 'tree-sun-heading' });
+          const output = node('output');
+          const slider = node('input', '', {
+            type: 'range', min: String(min), max: String(max), step: String(step), 'aria-label': title,
+          });
+          heading.append(node('span', title), output);
+          row.append(heading, slider);
+          slider.addEventListener('input', () => {
+            if (!sunSettings) { showError(new Error('Tree sun settings are unavailable.')); return; }
+            changeSun({ ...sunSettings, [key]: slider.valueAsNumber });
+          }, { signal });
+          sunInputs.set(key, slider);
+          sunReadouts.set(key, output);
+          controls.append(row);
+        }
+        for (const [key, title, options] of [
+          ['shadowMode', 'Shadow mode', [['hard', 'Hard'], ['filtered', 'Filtered'], ['contact', 'Contact hardening']]],
+          ['mapSize', 'Shadow quality', [['512', '512'], ['1024', '1024'], ['2048', '2048']]],
+        ] as const) {
+          const row = node('label', title, { class: 'tree-sun-select' });
+          const select = node('select', '', { 'aria-label': title });
+          for (const [value, text] of options) {
+            const option = node('option', text);
+            option.value = value;
+            select.append(option);
+          }
+          select.addEventListener('change', () => {
+            if (!sunSettings) { showError(new Error('Tree sun settings are unavailable.')); return; }
+            changeSun({
+              ...sunSettings, [key]: key === 'mapSize' ? Number(select.value) : select.value,
+            } as SunSettings);
+          }, { signal });
+          sunInputs.set(key, select);
+          row.append(select);
+          controls.append(row);
+        }
+        resetSun = button('Reset sun', () => {
+          sunSettings = { ...DEFAULT_SUN };
+          writeUrl();
+        });
+        controls.append(resetSun);
+        lighting.append(controls);
       }
       options('Wind direction', ['Left', 'Right'], () => wind.direction === -1 ? 0 : 1, index => { wind.direction = index === 0 ? -1 : 1; });
       const actions = node('div', '', { class: 'forage-actions' });
@@ -216,7 +302,10 @@ export function mountGroundAssetExplorer<Appearance extends GroundAssetAppearanc
       download(new Blob([JSON.stringify(appearance, null, 2)], { type: 'application/json' }), `${name.toLowerCase()}-${appearance.seed}.json`);
     }), node('p', `PNG keeps the transparent ${dimensions.width} × ${dimensions.height} pixel frame and ground baseline. Recipe includes manual choices.`));
     if (study.motion) exports.append(button('Download motion', () => {
-      download(new Blob([JSON.stringify({ version: 1, appearance, wind, seconds, paused }, null, 2)], { type: 'application/json' }), `${name.toLowerCase()}-motion-${appearance.seed}.json`);
+      download(new Blob([JSON.stringify({
+        version: 1, appearance, wind, seconds, paused,
+        ...(sunSettings ? { shadows, sun: sunSettings } : {}),
+      }, null, 2)], { type: 'application/json' }), `${name.toLowerCase()}-motion-${appearance.seed}.json`);
     }), node('p', 'PNG exports the still tree. Motion saves the current settings and time. Import is not implemented.'));
     const generation = section('Generation');
     const form = node('form', '', { class: 'color-seed-form', 'aria-label': `Reproduce ${name.toLowerCase()}` });
@@ -255,16 +344,34 @@ export function mountGroundAssetExplorer<Appearance extends GroundAssetAppearanc
     generate.className = 'primary';
     footer.append(generate);
     function writeUrl(): void {
-      history.replaceState(null, '', `#/foliage?tab=${study.tab}&${name.toLowerCase()}Seed=${appearance.seed}`);
+      const next = new URLSearchParams({ tab: study.tab, [`${name.toLowerCase()}Seed`]: String(appearance.seed) });
+      if (sunSettings) for (const [key, value] of sunParameters(sunSettings)) next.set(key, value);
+      history.replaceState(null, '', `#/foliage?${next}`);
     }
     function draw(): void {
+      contexts.forEach(context => context.clearRect(0, 0, context.canvas.width, context.canvas.height));
       contexts.forEach((context, index) => {
         if (study.motion) study.motion.draw(context, appearance, seconds, { ...wind, mode: index === 0 ? wind.mode : index - 1 });
         else study.draw(context, index === 0 ? appearance : { ...appearance, shape: index - 1 });
       });
       if (companionContext) {
+        companionContext.clearRect(0, 0, companionContext.canvas.width, companionContext.canvas.height);
         if (study.motion?.drawCompanion) study.motion.drawCompanion(companionContext, appearance, seconds, wind);
         else study.companion?.draw(companionContext, appearance);
+      }
+      if (companionContext && study.shadowStudy) {
+        const groundColor = getComputedStyle(stage).backgroundColor;
+        if (shadows) {
+          if (!sunSettings) throw new Error('Tree sun settings are unavailable.');
+          study.shadowStudy.draw(contexts[0], companionContext, appearance, seconds, wind, groundColor, sunSettings);
+        }
+        else for (const context of [contexts[0], companionContext]) {
+          context.save();
+          context.globalCompositeOperation = 'destination-over';
+          context.fillStyle = groundColor;
+          context.fillRect(0, study.shadowStudy.groundStart, context.canvas.width, context.canvas.height - study.shadowStudy.groundStart);
+          context.restore();
+        }
       }
       if (motionTime) motionTime.value = `${seconds.toFixed(2)} s`;
     }
@@ -299,19 +406,26 @@ export function mountGroundAssetExplorer<Appearance extends GroundAssetAppearanc
         output.value = `${wind[key].toFixed(1)}${key === 'strength' ? ' px' : '×'}`;
       }
       for (const choice of choices) choice.buttons.forEach((b, index) => b.setAttribute('aria-pressed', String(index === choice.selected())));
+      if (sunSettings) for (const [key, control] of sunInputs) {
+        control.value = String(sunSettings[key]);
+        control.disabled = !shadows || (key === 'softness' && sunSettings.shadowMode === 'hard');
+        const output = sunReadouts.get(key);
+        if (output) output.value = `${sunSettings[key]}${key === 'azimuth' || key === 'elevation' || (key === 'softness' && sunSettings.shadowMode === 'contact') ? '°' : ''}`;
+      }
+      if (resetSun) resetSun.disabled = !shadows;
       if (document.activeElement !== input) input.value = String(appearance.seed);
     }
     document.addEventListener('visibilitychange', () => { if (error.hidden) schedule(); }, { signal });
     const resize = new ResizeObserver(() => {
       const { width, height } = dimensions;
       const combinedWidth = width + (study.companion?.dimensions.width ?? 0);
-      const combinedHeight = Math.max(height, study.companion?.dimensions.height ?? 0);
+      const combinedHeight = Math.max(canvas.height, companionCanvas?.height ?? 0);
       const scale = Math.max(1, Math.min(10, Math.floor(Math.min((stage.clientWidth - (study.companion ? 56 : 32)) / combinedWidth, (stage.clientHeight - 100) / combinedHeight))));
       canvas.style.width = `${width * scale}px`;
-      canvas.style.height = `${height * scale}px`;
+      canvas.style.height = `${canvas.height * scale}px`;
       if (companionCanvas && study.companion) {
         companionCanvas.style.width = `${study.companion.dimensions.width * scale}px`;
-        companionCanvas.style.height = `${study.companion.dimensions.height * scale}px`;
+        companionCanvas.style.height = `${companionCanvas.height * scale}px`;
       }
     });
     resize.observe(stage);

@@ -25,7 +25,7 @@ const CROWNS: readonly (readonly Crown[])[] = [
     [43, 102, 10, 19], [38, 125, 7, 9], [47, 143, 5, 3]],
 ];
 
-const LOBE_OUTLINE: readonly PixelPoint[] = [
+export const LOBE_OUTLINE: readonly PixelPoint[] = [
   [-1, 0.05], [-0.93, -0.23], [-0.78, -0.27], [-0.8, -0.52],
   [-0.59, -0.7], [-0.42, -0.9], [-0.12, -0.86], [0.07, -1],
   [0.32, -0.88], [0.55, -0.88], [0.65, -0.63], [0.85, -0.61],

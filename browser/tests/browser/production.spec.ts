@@ -65,3 +65,24 @@ test('production Home and every explorer family run from a project subpath', asy
   expect(failures).toEqual([]);
   expect(errors).toEqual([]);
 });
+
+test('V2 environment and its comparison render under the production project subpath', async ({ page }) => {
+  const failures: string[] = [];
+  page.on('pageerror', error => failures.push(error.message));
+  page.on('response', response => {
+    if (response.status() >= 400) failures.push(`${response.status()} ${response.url()}`);
+  });
+  await page.goto('./#/island?version=v2&source=island&seed=12&water=still');
+  await expect(page.locator('.pilot')).toHaveAttribute('data-ready', 'true');
+  const canvas = page.locator('[data-island-surface="true"]');
+  await expect(canvas).toHaveAttribute('data-appearance', 'environment');
+  await expect(canvas).toHaveAttribute('data-grass-count', '0');
+  expect(Number(await canvas.getAttribute('data-water-pixels'))).toBeGreaterThan(1000);
+  await page.getByRole('button', { name: 'Blockout', exact: true }).click();
+  await expect(canvas).toHaveAttribute('data-appearance', 'blockout');
+  await expect(canvas).toHaveAttribute('data-seed', '12');
+  await page.getByRole('button', { name: 'Environment', exact: true }).click();
+  await expect(canvas).toHaveAttribute('data-appearance', 'environment');
+  await expect(page.locator('.runtime, .inspector')).toHaveCount(0);
+  expect(failures).toEqual([]);
+});

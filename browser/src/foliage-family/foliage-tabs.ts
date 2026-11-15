@@ -1,5 +1,5 @@
 export const GROUND_ASSET_GROUPS = [
-  { name: 'Plants', assets: [['bush', 'Berry bush'], ['grass', 'Grass'], ['ferns', 'Ferns'], ['moss', 'Moss'], ['reeds', 'Reeds & rushes']] },
+  { name: 'Plants', assets: [['bush', 'Berry bush'], ['bush-patch', 'Bush patch study'], ['grass', 'Grass'], ['ferns', 'Ferns'], ['moss', 'Moss'], ['reeds', 'Reeds & rushes']] },
   { name: 'Trees', assets: [['trees', 'Trees']] },
   { name: 'Forest floor', assets: [['leaves', 'Fallen leaves'], ['seeds', 'Pinecones & acorns']] },
   { name: 'Stone & wood', assets: [['rocks', 'Rocks'], ['pebbles', 'Small stones'], ['wood', 'Wood'], ['roots', 'Roots']] },
@@ -18,7 +18,7 @@ export function foliageTabs(selected: GroundAssetTab): HTMLElement {
   categories.className = 'forage-categories';
   categories.setAttribute('aria-label', 'Asset categories');
   const current = GROUND_ASSET_GROUPS.find(group => group.assets.some(([id]) => id === selected))!;
-  const href = (id: GroundAssetTab): string => `#/foliage?tab=${id}`;
+  const href = (id: GroundAssetTab): string => id === 'bush-patch' ? '#/bush-patch' : `#/foliage?tab=${id}`;
   for (const group of GROUND_ASSET_GROUPS) {
     const link = document.createElement('a');
     link.textContent = group.name;

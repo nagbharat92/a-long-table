@@ -1,13 +1,18 @@
 import type { BushPhase } from './contracts';
 import type { BerryFruit } from './bush-crop';
-import { FOLIAGE_PALETTES } from './foliage-palettes';
-
-export const BUSH_PALETTES = FOLIAGE_PALETTES;
+import { polygonContains } from './pixel-geometry';
+import { LOBE_OUTLINE } from './tree-assets';
+export const BUSH_PALETTES = [
+  { name: 'Woodland', ink: '#4b5c4d', leaf: '#4b705b', light: '#719363', bud: '#a0b49a' },
+  { name: 'Sage', ink: '#626e62', leaf: '#739486', light: '#9bb49a', bud: '#b8c9ae' },
+  { name: 'Blue spruce', ink: '#414f59', leaf: '#304d59', light: '#4f7377', bud: '#91aaa8' },
+  { name: 'Autumn', ink: '#625c4c', leaf: '#82785f', light: '#a69a77', bud: '#c4b995' },
+] as const;
 export const BERRY_PALETTES = [
-  { name: 'Rose', fruit: '#c84962', light: '#f0a18a' },
-  { name: 'Blueberry', fruit: '#555b9d', light: '#a4b5e3' },
-  { name: 'Golden', fruit: '#bd742c', light: '#f4cf77' },
-  { name: 'Blackberry', fruit: '#624475', light: '#bb8cba' },
+  { name: 'Rose', fruit: '#b56e7c', light: '#d9a0a4' },
+  { name: 'Blueberry', fruit: '#69719a', light: '#abb7d1' },
+  { name: 'Golden', fruit: '#b4894f', light: '#dabb80' },
+  { name: 'Blackberry', fruit: '#6e5c78', light: '#a697ad' },
 ] as const;
 export const BERRY_LAYOUTS = [
   { name: 'Classic', points: [[-4, -5], [0, -7], [3, -4]] },
@@ -71,117 +76,75 @@ export function generateBush(seed: number): BushAppearance {
 
 export const BUSH_PREVIEW_SIZE = { width: 40, height: 48 } as const;
 
-// Authored leaf masses, rather than noise, keep every palette's silhouette readable.
-const PREVIEW_FOLIAGE = [
-  '                ii',
-  '          ii   immi',
-  '         immi immlmi',
-  '       iimlmimmmllmi ii',
-  '      imllmlmmmllmmimlmi',
-  '      imlllmmimmmmimllmi',
-  '     imllmmissmmimmmllmmi',
-  '    iimmmmisssmmmimmmmlmi',
-  '   immlmmisssimllmmimmmii',
-  '   imllmmisssmmlllmmissmi',
-  '  imllmmmissmmllmlmmissmmi',
-  '  immmimmmissmmmmmmisssmmi',
-  '   immissmmiissmmmisssmmi',
-  '  iimissssmmiiissssimmmii',
-  ' immlmisssmmmmmiiimmlmmmi',
-  ' imllmmissmllmmssmllmlmmmi',
-  'imllmlmismlllmmssmllmmmlmi',
-  'imlmmmissmllmmisssmmmmmlmmi',
-  ' immmisssmmmmmiiisssmmmmmi',
-  'iimmissssimmmissssimmmiimii',
-  'immmisssssiisssssimmlmmssmmi',
-  'immlmmisssssssssimllmmmssmmi',
-  'imllmmmiiisssssimllmmmisssmi',
-  ' immmmmmmiissssimmmmmiissmi',
-  'iimmmmmssmiissssimmmissssmii',
-  'immmmsssssmisssssiiissssmmi',
-  ' immmissssmmiissssssssmmmi',
-  '  immmiisssmmmisssssimmmmi',
-  ' iimmmmiisssmmiisssimmmi',
-  '  immmmmissssmmiisssmmi',
-  '   iimmmiissssmisssmmi',
-  '    immmmiisssiissmii',
-  '      iimmmiissssmii',
-  '        iimmmssmii',
-  '          iiiiii',
-] as const;
-
-// Layer the same authored leaf bundle into different crowns, with no random edge noise.
-const LEAF_BUNDLE = [
-  '      ii',
-  '    iillii',
-  '  iilllllmii',
-  ' imllmllmlmmi',
-  'imlllmlmmllmmi',
-  'imllmmmmllmlmmi',
-  ' immmllmmmmmmmi',
-  'immmmlmmmmmmssi',
-  'immmmmmmssmssmi',
-  ' immmssmmssssmi',
-  '  imsssmssssmi',
-  '   iisssssii',
-  '     iiiii',
-] as const;
-
-function leafCrown(bundles: readonly (readonly [number, number])[]): readonly string[] {
-  const rows = Array.from({ length: BUSH_PREVIEW_SIZE.height }, () => Array<string>(BUSH_PREVIEW_SIZE.width).fill(' '));
-  for (const [left, top] of bundles) {
-    LEAF_BUNDLE.forEach((row, y) => [...row].forEach((value, x) => {
-      if (value !== ' ') rows[top + y][left + x] = value;
-    }));
-  }
-  return rows.map(row => row.join(''));
-}
-
 type WoodPixel = readonly [x: number, y: number, width: number, height: number, tone: number];
+type Crown = readonly [x: number, y: number, radiusX: number, radiusY: number];
 interface BushShape {
   name: string;
-  leaves: readonly string[];
-  left: number;
-  top: number;
+  crowns: readonly Crown[];
   wood: readonly WoodPixel[];
 }
 
 export const BUSH_SHAPES: readonly BushShape[] = [
   {
-    name: 'Upright shrub', leaves: PREVIEW_FOLIAGE, left: 6, top: 2,
+    name: 'Upright shrub',
+    crowns: [[19, 10, 8, 8], [12, 17, 7, 9], [27, 18, 8, 8], [17, 26, 9, 10], [27, 27, 7, 8]],
     wood: [
       [17, 34, 6, 8, 0], [18, 37, 3, 5, 1], [16, 40, 3, 3, 1],
-      [14, 42, 4, 2, 1], [21, 40, 3, 4, 1], [24, 42, 2, 2, 1],
+      [16, 41, 3, 2, 1], [21, 40, 3, 3, 1],
       [17, 41, 1, 2, 2], [21, 40, 1, 2, 2],
     ],
   },
   {
     name: 'Spreading bush',
-    leaves: leafCrown([[3, 28], [13, 30], [23, 28], [1, 23], [22, 22], [8, 19], [17, 20]]),
-    left: 0, top: -3,
+    crowns: [[9, 28, 8, 7], [18, 24, 9, 8], [29, 27, 8, 7], [19, 33, 12, 7]],
     wood: [
-      [16, 36, 7, 7, 0], [17, 38, 3, 5, 1], [13, 41, 5, 2, 0],
-      [21, 41, 6, 2, 0], [17, 39, 1, 3, 2],
+      [17, 36, 5, 7, 0], [18, 38, 2, 5, 1], [15, 41, 3, 2, 0],
+      [22, 41, 3, 2, 0], [18, 39, 1, 3, 2],
     ],
   },
   {
     name: 'Forked tree',
-    leaves: leafCrown([[7, 17], [17, 16], [2, 13], [22, 10], [12, 11], [4, 6], [14, 3]]),
-    left: 0, top: 0,
+    crowns: [[13, 12, 7, 9], [26, 10, 7, 8], [12, 22, 8, 8], [27, 23, 8, 8], [20, 29, 10, 7]],
     wood: [
       [17, 25, 6, 17, 0], [18, 27, 3, 14, 1], [18, 31, 1, 7, 2],
       [13, 27, 6, 4, 0], [10, 23, 5, 5, 0],
       [22, 22, 4, 10, 0], [25, 20, 3, 5, 0],
-      [22, 25, 2, 6, 1], [16, 40, 7, 3, 0], [14, 42, 4, 2, 0],
-      [22, 41, 4, 3, 0], [17, 40, 3, 3, 1], [22, 41, 2, 2, 1],
+      [22, 25, 2, 6, 1], [17, 40, 5, 3, 0], [16, 41, 3, 2, 0],
+      [22, 41, 3, 2, 0], [18, 40, 2, 3, 1], [22, 41, 2, 2, 1],
     ],
   },
 ];
 
-export function bushLeafAt(appearance: BushAppearance, x: number, y: number): string | undefined {
+const leafCache = new Map<string, readonly string[]>();
+
+function bushLeaves(appearance: BushAppearance): readonly string[] {
   const shape = BUSH_SHAPES[appearance.shape];
   if (!shape) throw new RangeError('Unknown bush shape.');
-  return shape.leaves[y - shape.top]?.[x - shape.left]?.trim();
+  const key = `${appearance.seed}:${appearance.shape}`;
+  const cached = leafCache.get(key);
+  if (cached) return cached;
+  const rows = Array.from({ length: BUSH_PREVIEW_SIZE.height }, () => Array<string>(BUSH_PREVIEW_SIZE.width).fill(' '));
+  shape.crowns.forEach(([cx, cy, rx, ry], mass) => {
+    const outline = LOBE_OUTLINE.map(([x, y], point) => {
+      const radius = 0.92 + bushHash(appearance.seed, mass * 37 + point + 1) / 4294967295 * 0.16;
+      return [cx + x * rx * radius, cy + y * ry * radius] as const;
+    });
+    for (let y = Math.max(0, Math.floor(cy - ry - 2)); y < Math.min(BUSH_PREVIEW_SIZE.height, cy + ry + 2); y++) {
+      for (let x = Math.max(0, Math.floor(cx - rx - 2)); x < Math.min(BUSH_PREVIEW_SIZE.width, cx + rx + 2); x++) {
+        if (!polygonContains(outline, x + 0.5, y + 0.5)) continue;
+        const shadeEdge = cy + ry * 0.45 - (x - cx) * 0.22 + Math.sin((x - cx) / rx * 2.8) * ry * 0.12;
+        rows[y][x] = y > shadeEdge ? 's' : 'm';
+      }
+    }
+  });
+  const leaves = rows.map(row => row.join(''));
+  if (leafCache.size >= 32) leafCache.delete(leafCache.keys().next().value!);
+  leafCache.set(key, leaves);
+  return leaves;
+}
+
+export function bushLeafAt(appearance: BushAppearance, x: number, y: number): string | undefined {
+  return bushLeaves(appearance)[y]?.[x]?.trim();
 }
 
 export function berryPositions(appearance: BushAppearance): { x: number; y: number; maturity: number }[] {
@@ -191,13 +154,14 @@ export function berryPositions(appearance: BushAppearance): { x: number; y: numb
   const shape = BUSH_SHAPES[appearance.shape];
   if (!shape) throw new RangeError('Unknown bush shape.');
   if (!BERRY_LAYOUTS[appearance.layout]) throw new RangeError('Unknown berry placement.');
+  const leaves = bushLeaves(appearance);
   const candidates: { x: number; y: number; score: number; maturity: number }[] = [];
   for (let y = 0; y < BUSH_PREVIEW_SIZE.height - 3; y++) {
     for (let x = 1; x < BUSH_PREVIEW_SIZE.width - 3; x++) {
       // The whole fruit footprint must stay inside the authored leaf silhouette.
       if (![[0, 3], [-1, 5], [0, 4], [0, 4]].every(([left, width], dy) => {
-        const start = x + left - shape.left;
-        const row = shape.leaves[y + dy - shape.top]?.slice(start, start + width);
+        const start = x + left;
+        const row = leaves[y + dy]?.slice(start, start + width);
         return start >= 0 && row?.length === width && !row.includes(' ');
       })) continue;
       const field = berryNoise(appearance.seed, x * 0.13, y * 0.13) * 2 - 1;
@@ -223,20 +187,6 @@ export function drawBushPreview(context: CanvasRenderingContext2D, phase: BushPh
   const layout = BERRY_LAYOUTS[appearance.layout];
   const shape = BUSH_SHAPES[appearance.shape];
   if (!foliage || !berry || !layout || !shape) throw new RangeError('Unknown bush appearance option.');
-  const colors: Record<string, string> = {
-    i: foliage.ink,
-    s: foliage.leaf,
-    m: foliage.leaf,
-    l: foliage.light,
-  };
-  // Mix a distinct cool middle shadow without adding another customization parameter.
-  const shade = (hex: string, ink: string): string => {
-    const channel = (offset: number): number => Math.round(
-      parseInt(hex.slice(offset, offset + 2), 16) * 0.48 + parseInt(ink.slice(offset, offset + 2), 16) * 0.52,
-    );
-    return `rgb(${channel(1)}, ${channel(3)}, ${channel(5)})`;
-  };
-  colors.s = shade(foliage.leaf, foliage.ink);
   context.save();
   context.clearRect(0, 0, BUSH_PREVIEW_SIZE.width, BUSH_PREVIEW_SIZE.height);
   context.imageSmoothingEnabled = false;
@@ -245,11 +195,12 @@ export function drawBushPreview(context: CanvasRenderingContext2D, phase: BushPh
     context.fillRect(x, y, width, height);
   };
   for (const [x, y, width, height, tone] of shape.wood) {
-    pixel(x, y, width, height, ['#743e32', '#a35b36', '#c17a43'][tone]);
+    pixel(x, y, width, height, ['#635b4b', '#92816a', '#ad9f88'][tone]);
   }
-  for (const [y, row] of shape.leaves.entries()) {
+  for (const [y, row] of bushLeaves(appearance).entries()) {
     for (const [x, value] of [...row].entries()) {
-      if (value !== ' ') pixel(x + shape.left, y + shape.top, 1, 1, colors[value]);
+      if (value === ' ') continue;
+      pixel(x, y, 1, 1, value === 's' ? foliage.leaf : foliage.light);
     }
   }
   const crop = fruits ?? berryPositions(appearance).map(point => ({ ...point, stage: phase === 'ripe' ? 'ripe' : phase === 'growing' ? 'bud' : 'picked' }));

@@ -75,6 +75,22 @@ input[type="text"], input[type="number"], select {
   min-height: 40px; background: var(--game-deep); color: var(--game-paper); border: 1px solid var(--game-edge);
   border-radius: 3px; padding: 8px 12px; min-width: 0;
 }
+select:not([multiple]):not([size]), select[size="1"]:not([multiple]) {
+  appearance: none;
+  padding-right: 40px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4' fill='none' stroke='%23f0f3df' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px 16px;
+}
+select:hover:not(:disabled) { border-color: var(--game-paper); }
+select:active:not(:disabled) { border-color: var(--game-active); }
+select:disabled { opacity: .48; cursor: not-allowed; }
+@media (forced-colors: active) {
+  select:not([multiple]):not([size]), select[size="1"]:not([multiple]) {
+    appearance: auto; background-image: none; padding-right: 12px;
+  }
+}
 input[type="color"] { width: 42px; height: 36px; flex: none; border: 1px solid var(--game-edge); background: var(--game-deep); padding: 3px; cursor: pointer; }
 .p-tray { display: flex; flex-direction: column; min-width: 0; }
 .p-tray-tabs { display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 20px; }

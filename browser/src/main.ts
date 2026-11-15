@@ -43,6 +43,7 @@ async function route(): Promise<void> {
   if (path === '/trees' || path === '/foraging') {
     history.replaceState(null, '', `#/foliage?${parameters}`);
   }
+  if (id === 'bush-patch' && path !== '/bush-patch') history.replaceState(null, '', `#/bush-patch?${parameters}`);
   const shell = createShell(id, lifetime.signal);
   root!.replaceChildren(shell.root);
   if (preview) shell.previewControls.append(preview);
@@ -73,6 +74,10 @@ async function route(): Promise<void> {
       const { mountCharacterFamily } = await import('./pilot/character-family');
       if (current !== revision) return;
       mounted = await mountCharacterFamily(shell, parameters);
+    } else if (id === 'bush-patch') {
+      const { mountBushPatch } = await import('./bush-patch/explorer');
+      if (current !== revision) return;
+      mounted = mountBushPatch(shell, parameters);
     } else if (id === 'foliage') {
       const { mountFoliageFamily } = await import('./pilot/foliage-family');
       if (current !== revision) return;

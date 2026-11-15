@@ -1,5 +1,5 @@
 import { type PixelAssetDefinition, type PixelBrush } from './ground-pixel-art';
-import type { PixelPoint } from './pixel-geometry';
+import { polygonContains, type PixelPoint } from './pixel-geometry';
 import { seededRandom } from './random';
 
 type Point = PixelPoint;
@@ -107,24 +107,25 @@ export const FERN_ASSET: PixelAssetDefinition = {
 
 function mossDome(brush: PixelBrush, cx: number, bottom: number, rx: number, height: number, random: () => number): void {
   const top = bottom - height;
-  brush.polygon([[cx - rx, bottom - 2], [cx - rx, top + height * 0.6],
+  const outline: Point[] = [[cx - rx, bottom - 2], [cx - rx, top + height * 0.6],
     [cx - rx * 0.72, top + height * 0.27], [cx - rx * 0.3, top + 1],
     [cx + rx * 0.15, top], [cx + rx * 0.63, top + height * 0.2],
     [cx + rx * 0.92, top + height * 0.55], [cx + rx, bottom - 3],
-    [cx + rx * 0.65, bottom], [cx - rx * 0.55, bottom]], 1);
-  brush.ellipse(cx - 0.5, top + height * 0.52, rx * 0.91, height * 0.45, 2);
-  brush.ellipse(cx - rx * 0.17, top + height * 0.37, rx * 0.68, height * 0.29, 3);
-  // Small directional shoots follow the dome rather than an all-over noise fill.
-  for (let row = 0; row < 3; row++) {
-    const yy = top + 3 + row * 3;
-    const half = rx * (row === 0 ? 0.43 : 0.69);
-    for (let xx = cx - half + (row % 2) * 2; xx < cx + half; xx += 4) {
-      if (yy >= bottom - 2) continue;
-      const x = Math.round(xx + (random() - 0.5));
-      const y = Math.round(yy + (random() > 0.7 ? 1 : 0));
-      brush.line([x, y + 1], [x - 1, y - 1], row === 0 ? 4 : 3);
-      brush.put(x + 1, y, row === 0 && random() > 0.65 ? 5 : 4);
+    [cx + rx * 0.65, bottom], [cx - rx * 0.55, bottom]];
+  for (let y = Math.floor(top); y <= bottom; y++) {
+    for (let x = Math.floor(cx - rx); x <= cx + rx; x++) {
+      if (!polygonContains(outline, x + 0.5, y + 0.5)) continue;
+      const side = (x - cx) / rx;
+      const shadeEdge = top + height * (0.75 - side * 0.12 + Math.sin(side * 3.5 + cx * 0.17) * 0.08);
+      const lightEdge = top + height * (0.32 + Math.abs(side) * 0.1 + Math.sin(side * 4.5 + cx * 0.11) * 0.045);
+      const crest = y < top + height * (0.14 - side * 0.06) && side > -0.4 && side < 0.18;
+      brush.put(x, y, y > shadeEdge ? 1 : crest ? 4 : y < lightEdge ? 3 : 2);
     }
+  }
+  for (const side of [-0.3, 0.28]) {
+    const x = Math.round(cx + rx * side + (random() - 0.5));
+    const y = Math.round(top + (side < 0 ? 2 : 1));
+    brush.line([x, y + 1], [x - 1, y - 1], 3);
   }
 }
 
@@ -133,11 +134,11 @@ export const MOSS_ASSET: PixelAssetDefinition = {
   shapes: ['Low cushion', 'Rounded mound', 'Trailing strip'],
   paletteLabel: 'Moss palette',
   palettes: [
-    { name: 'Rainy emerald', tones: ['', '#203d28', '#386132', '#608943', '#94b45c', '#c9d88b'] },
-    { name: 'Silver pincushion', tones: ['', '#2a4338', '#4d7060', '#78977a', '#adc3a0', '#d2dfb6'] },
-    { name: 'Sunlit chartreuse', tones: ['', '#354228', '#5c6e32', '#8d9d43', '#bac76c', '#e0dfa2'] },
+    { name: 'Rainy emerald', tones: ['', '#496655', '#5b7a62', '#719363', '#90aa89'] },
+    { name: 'Silver pincushion', tones: ['', '#52665d', '#708878', '#8fa894', '#aabda8'] },
+    { name: 'Sunlit chartreuse', tones: ['', '#5b674d', '#77845e', '#94a072', '#b1ba91'] },
   ],
-  intro: 'Soft, overlapping cushions with shaded lower skirts and carefully grouped tiny leafy shoots, never a ground shadow.',
+  intro: 'Overlapping cushions with broad upper planes, shaded lower skirts and a few small upright shoots.',
   references: [{
     title: 'Pincushion moss — Leucobryum glaucum',
     url: 'https://en.wikipedia.org/wiki/Leucobryum_glaucum',

@@ -11,17 +11,19 @@ const updates = page => page.getByRole('complementary', { name: 'Development upd
 test.beforeEach(async () => {
   fixture = fileURLToPath(new URL(`../.cache/preview-fixture-${randomUUID()}/`, import.meta.url));
   await mkdir(`${fixture}/src/pilot`, { recursive: true });
+  await mkdir(`${fixture}/src/bush-patch`, { recursive: true });
   await mkdir(`${fixture}/public`);
   await writeFile(`${fixture}/index.html`, '<html><body><h1></h1><input aria-label="Note"><script type="module" src="/main.js"></script></body></html>');
   await writeFile(`${fixture}/main.js`, `import './shared.css';
 const route = location.hash.slice(2).split('?')[0];
-const routes = { character: () => import('./src/pilot/character.ts'), foliage: () => import('./src/pilot/trees.ts') };
+const routes = { character: () => import('./src/pilot/character.ts'), foliage: () => import('./src/pilot/trees.ts'), 'bush-patch': () => import('./src/bush-patch/explorer.ts') };
 const feature = await routes[route]();
 document.querySelector('h1').textContent = feature.label;
 window.token = crypto.randomUUID();`);
   await writeFile(`${fixture}/shared.css`, 'body { color: black; }');
   await writeFile(`${fixture}/src/pilot/character.ts`, "export const label = 'Character one';");
   await writeFile(`${fixture}/src/pilot/trees.ts`, "export const label = 'Trees one';");
+  await writeFile(`${fixture}/src/bush-patch/explorer.ts`, "export const label = 'Patch one';");
   preview = await startParallelPreview({ root: fixture, port: 0, scopes, configFile: false });
 });
 test.afterEach(async () => {
@@ -32,6 +34,7 @@ test.afterEach(async () => {
 });
 
 test('pilot scopes classify private and shared source correctly', () => {
+  expect(affectedRoutes(['src/bush-patch/explorer.ts', 'src/bush-patch/generation.ts'], scopes)).toEqual(['/bush-patch']);
   expect(affectedRoutes(['src/pilot/character.ts'], scopes)).toEqual(['/character']);
   expect(affectedRoutes(['src/pilot/trees.css'], scopes)).toEqual(['/foliage', '/trees', '/foraging']);
   expect(affectedRoutes(['src/tree-source/core/tree-motion.ts'], scopes)).toEqual(['/foliage', '/trees', '/foraging']);
@@ -42,6 +45,26 @@ test('pilot scopes classify private and shared source correctly', () => {
   expect(affectedRoutes(['src/pilot/play.ts'], scopes)).toEqual(['/play']);
   expect(affectedRoutes(['src/pilot/pilot.css'], scopes)).toBeNull();
   expect(affectedRoutes(['src/pilot/ui.ts'], scopes)).toBeNull();
+});
+
+test('bush-patch private updates leave held foliage sessions untouched', async ({ page, context }) => {
+  const trees = await context.newPage();
+  await page.goto(`${preview.url}/#/bush-patch`);
+  await trees.goto(`${preview.url}/#/foliage`);
+  await expect(page.getByRole('heading')).toHaveText('Patch one');
+  await expect(trees.getByRole('heading')).toHaveText('Trees one');
+  await expect(updates(page).locator('summary')).toHaveText('Updates held');
+  await expect(updates(trees).locator('summary')).toHaveText('Updates held');
+  await trees.getByLabel('Note').fill('Protected tree session');
+  const token = await trees.evaluate(() => window.token);
+  await writeFile(`${fixture}/src/bush-patch/explorer.ts`, "export const label = 'Patch two';");
+  await expect(updates(page).locator('summary')).toHaveText('Update available');
+  await expect(updates(trees).locator('summary')).toHaveText('Updates held');
+  await expect(page.getByRole('heading')).toHaveText('Patch one');
+  await updates(page).getByRole('button', { name: 'Apply update' }).click();
+  await expect(page.getByRole('heading')).toHaveText('Patch two');
+  expect(await trees.evaluate(() => window.token)).toBe(token);
+  await expect(trees.getByLabel('Note')).toHaveValue('Protected tree session');
 });
 
 test('private edits hold both sessions and apply only to the chosen tab; shared CSS notifies both', async ({ page, context }) => {

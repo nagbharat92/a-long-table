@@ -1,0 +1,20 @@
+.bush-patch-stage {
+  display: grid; place-items: center; width: 100%; height: 100%; min-width: 0;
+  overflow: auto; padding: 24px; background: var(--game-stage); color: var(--game-deep);
+}
+.bush-patch-stage figure { display: grid; justify-items: center; gap: 16px; margin: 0; max-width: 100%; min-width: 0; }
+.bush-patch-stage canvas { display: block; max-width: 100%; height: auto; image-rendering: pixelated; }
+.bush-patch-stage figcaption { text-align: center; font-size: 12px; max-width: 100%; }
+.bush-patch-study .p-section { display: grid; gap: 14px; }
+.bush-patch-seed, .bush-patch-select { display: grid; gap: 8px; }
+.bush-patch-seed input, .bush-patch-select select {
+  width: 100%; min-height: 38px; padding: 8px; border: 1px solid var(--game-edge);
+  border-radius: 3px; background: var(--game-ink); color: var(--game-paper); font: inherit;
+}
+.bush-patch-toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.bush-patch-toggle input { flex: none; width: 16px; height: 16px; accent-color: var(--game-active); }
+.bush-patch-depth { display: flex; gap: 6px; font-size: 11px; }
+.bush-patch-depth span { flex: 1; padding: 8px 4px; text-align: center; color: #10272d; background: #778950; }
+.bush-patch-depth span:first-child { background: #4a6745; color: #edf0d7; }
+.bush-patch-depth span:nth-child(2) { background: #587449; color: #f2f1d9; }
+@media (max-width: 700px) { .bush-patch-stage { padding: 12px; } }

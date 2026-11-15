@@ -1,5 +1,7 @@
 export interface LandPoint { x: number; y: number }
 export interface LandVertex extends LandPoint { z: number }
+export interface LandBoundarySegment { from: LandVertex; to: LandVertex }
+export interface LandCamera { yaw: number; center: LandPoint }
 export type LandProjection = 'current' | 'oblique' | 'plan';
 export type LandPlane = 'top' | 'light' | 'middle' | 'dark';
 export interface LandMass {
@@ -8,10 +10,19 @@ export interface LandMass {
   height: number;
   boundary: readonly LandPoint[];
 }
+export type IslandMeshLayerId = 'base' | 'uplands' | 'beaches' | 'seabed';
+export type IslandLayerId = IslandMeshLayerId | 'water';
 export interface LandTriangle {
   vertices: readonly [LandVertex, LandVertex, LandVertex];
   plane: LandPlane;
   level: number;
+  wallTop?: number;
+  wallBottom?: number;
+  ascentId?: number;
+  submerged?: boolean;
+  layer?: IslandMeshLayerId;
+  boundaryEdges?: readonly [boolean, boolean, boolean];
+  boundarySegments?: readonly LandBoundarySegment[];
 }
 
 function boundary(points: readonly (readonly [number, number])[]): readonly LandPoint[] {
@@ -127,7 +138,15 @@ export function landformTriangles(masses: readonly LandMass[] = LANDFORM_FIXTURE
   return triangles;
 }
 
-export function projectLandVertex(point: LandVertex, projection: LandProjection): LandVertex {
+export function rotateLandPoint(point: LandPoint, camera: LandCamera, inverse = false): LandPoint {
+  const angle = camera.yaw * (inverse ? -1 : 1);
+  const cosine = Math.cos(angle), sine = Math.sin(angle);
+  const x = point.x - camera.center.x, y = point.y - camera.center.y;
+  return { x: camera.center.x + x * cosine - y * sine, y: camera.center.y + x * sine + y * cosine };
+}
+
+export function projectLandVertex(point: LandVertex, projection: LandProjection, camera?: LandCamera): LandVertex {
+  if (camera) point = { ...rotateLandPoint(point, camera), z: point.z };
   if (projection === 'plan') return { x: point.x, y: point.y, z: point.z };
   if (projection === 'current') return { x: point.x, y: point.y - point.z, z: point.y + point.z };
   return {
